@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Databases
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
