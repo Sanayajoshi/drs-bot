@@ -130,7 +130,8 @@ class SetupCog(commands.Cog):
         app_commands.Choice(name="Spanish",  value="es"),
         app_commands.Choice(name="German",   value="de"),
         app_commands.Choice(name="Hindi",    value="hi"),
-        app_commands.Choice(name="Polish",    value="pl"),
+        app_commands.Choice(name="Polish",   value="pl"),
+        app_commands.Choice(name="French",   value="fr"),
     ])
     async def language(self, interaction: discord.Interaction, language: app_commands.Choice[str]):
         lang = self._lang(interaction.guild_id)

@@ -141,7 +141,6 @@ class QueueCog(commands.Cog):
             role_id = full_srv.get(f"role_drs{drs_level}")
             role_mention = f"<@&{role_id}> " if role_id else ""
 
-            # Plain text: @role PlayerName joined DRS9 (1/3)
             line = f"{role_mention}**{display_name}** joined **DRS{drs_level}** ({current}/{total})"
             try:
                 await channel.send(line)
@@ -172,6 +171,32 @@ class QueueCog(commands.Cog):
             except Exception as e:
                 logger.error(f"notify_left failed for guild {guild_id}: {e}")
 
+    # ------------------------------------------------------------------
+    # Extend notification — role mention re-fires for the level
+    # ------------------------------------------------------------------
+
+    async def _notify_extend(self, discord_id: int, display_name: str, drs_level: int):
+        """Notify every server's notification channel that a player extended, with role ping."""
+        for srv in self.bot.db.get_all_servers():
+            guild_id = srv["guild_id"]
+            full_srv = self.bot.db.get_server(guild_id)
+            if not full_srv or not full_srv.get("notification_channel_id"):
+                continue
+            guild   = self.bot.get_guild(guild_id)
+            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            if not channel:
+                continue
+            lang    = full_srv.get("language", "en")
+            role_id = full_srv.get(f"role_drs{drs_level}")
+            role_mention = f"<@&{role_id}> " if role_id else ""
+            try:
+                await channel.send(
+                    t(lang, "notify_extend", role=role_mention, name=display_name, level=drs_level)
+                )
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                logger.error(f"notify_extend failed for guild {guild_id}: {e}")
 
     async def _notify_match_formed(self, drs_level: int):
         """Broadcast match-formed notice to every server's notification channel. No tags."""
@@ -274,11 +299,15 @@ class QueueCog(commands.Cog):
             return
 
         self.bot.db.extend_queue(owner_id, config.EXTEND_MINS)
-        # Clear the warning so they can be warned again if they don't extend next time
+        # Clear the warning so they can be warned again next time
         self._warned.discard((owner_id, drs_level))
+
         await interaction.followup.send(
             t(lang, "expiry_extended_ok", level=drs_level), ephemeral=True
         )
+
+        # Re-fire role mention notification
+        await self._notify_extend(owner_id, interaction.user.display_name, drs_level)
         await self._push_queue_update()
 
     # ------------------------------------------------------------------
@@ -308,7 +337,6 @@ class QueueCog(commands.Cog):
                 await interaction.followup.send(
                     t(lang, "left_level_all_gone", level=level), ephemeral=True
                 )
-            # Notify others that this player left
             await self._notify_left(display_name, level)
             await self._push_queue_update()
             return
@@ -325,7 +353,6 @@ class QueueCog(commands.Cog):
             await interaction.followup.send(
                 t(lang, "joined", level=level, time="30m", levels=level_str), ephemeral=True
             )
-            # Notify on 1st and 2nd player joining
             if len(queue) <= 2:
                 await self._notify_joined(discord_id, display_name, level)
 
@@ -351,14 +378,13 @@ class QueueCog(commands.Cog):
         level_str = ", ".join(f"DRS{l}" for l in sorted(levels))
         await interaction.followup.send(t(lang, "left_all", levels=level_str), ephemeral=True)
 
-        # Notify for each level they left
         for lvl in levels:
             await self._notify_left(display_name, lvl)
 
         await self._push_queue_update()
 
     # ------------------------------------------------------------------
-    # Extend all
+    # Extend all — now fires role mention notification per level
     # ------------------------------------------------------------------
 
     async def _handle_extend(self, interaction: discord.Interaction):
@@ -368,14 +394,20 @@ class QueueCog(commands.Cog):
         if not levels:
             await interaction.followup.send(t(lang, "not_in_queue"), ephemeral=True)
             return
+
         self.bot.db.extend_queue(interaction.user.id, config.EXTEND_MINS)
-        # Clear warnings so they can be warned fresh
         for lvl in levels:
             self._warned.discard((interaction.user.id, lvl))
+
         level_str = ", ".join(f"DRS{l}" for l in sorted(levels))
         await interaction.followup.send(
             t(lang, "extended", mins=config.EXTEND_MINS, levels=level_str), ephemeral=True
         )
+
+        # Fire role-mention notification for each extended level
+        for lvl in levels:
+            await self._notify_extend(interaction.user.id, interaction.user.display_name, lvl)
+
         await self._push_queue_update()
 
     # ------------------------------------------------------------------
@@ -482,7 +514,6 @@ class QueueCog(commands.Cog):
             now = datetime.utcnow().replace(tzinfo=timezone.utc)
             warn_threshold = now + timedelta(minutes=EXPIRY_WARN_MINS)
 
-            # Check for entries expiring soon and warn them
             all_entries = self.bot.db.get_full_queue()
             for entry in all_entries:
                 key = (entry["discord_id"], entry["drs_level"])
@@ -496,10 +527,8 @@ class QueueCog(commands.Cog):
                     if warned:
                         self._warned.add(key)
 
-            # Remove expired entries
             removed_ids = self.bot.db.remove_expired_entries()
             if removed_ids:
-                # Clear warnings for removed entries
                 self._warned = {k for k in self._warned if k[0] not in removed_ids}
                 logger.info(f"Expiry sweep removed entries for {len(removed_ids)} user(s)")
                 await self._push_queue_update()

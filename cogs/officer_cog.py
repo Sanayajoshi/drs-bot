@@ -61,6 +61,54 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
+    # /officer servers — list all guilds the bot is installed on
+    # ------------------------------------------------------------------
+
+    @drs.command(name="servers", description="List all servers the bot is installed on")
+    async def servers(self, interaction: discord.Interaction):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        guilds = self.bot.guilds
+        db_servers = {s["guild_id"]: s for s in self.bot.db.get_all_servers()}
+
+        embed = discord.Embed(
+            title=f"🌐 Bot Servers — {len(guilds)} installed",
+            color=discord.Color.blurple(),
+        )
+
+        lines = []
+        for guild in sorted(guilds, key=lambda g: g.name.lower()):
+            db  = db_servers.get(guild.id, {})
+            configured = "✅" if db.get("queue_channel_id") else "⚠️"
+            lang = db.get("language", "en") if db else "—"
+            lines.append(
+                f"{configured} **{guild.name}** `({guild.id})`\n"
+                f"-# {guild.member_count:,} members · lang: `{lang}`"
+            )
+
+        # Discord embed field value cap is 1024 chars — chunk if needed
+        chunk, chunks = [], []
+        for line in lines:
+            chunk.append(line)
+            if len("\n\n".join(chunk)) > 900:
+                chunks.append("\n\n".join(chunk[:-1]))
+                chunk = [line]
+        chunks.append("\n\n".join(chunk))
+
+        for i, block in enumerate(chunks):
+            embed.add_field(
+                name=f"Servers {i + 1}" if len(chunks) > 1 else "Servers",
+                value=block or "—",
+                inline=False,
+            )
+
+        embed.set_footer(text="✅ = queue configured  ·  ⚠️ = setup not run")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ------------------------------------------------------------------
     # /officer match <id> — details on a specific match
     # ------------------------------------------------------------------
 

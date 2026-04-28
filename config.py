@@ -20,7 +20,7 @@ EXPIRY_INTERVAL_SECS = 30
 FEEDBACK_DELAY_MINS = 30
 
 # Supported languages
-SUPPORTED_LANGUAGES = ["en", "ja", "es", "de", "hi"]
+SUPPORTED_LANGUAGES = ["en", "ja", "es", "de", "hi", "pl", "fr"]
 
 # Developer Discord user IDs — always have full bot access
 DEV_USER_IDS = [508209182374363137]
