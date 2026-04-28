@@ -126,6 +126,19 @@ class DatabaseOperations:
                 UNIQUE (match_id, discord_id)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_fb_match ON feedback(match_id)",
+            # NEW: structured per-player reports
+            """CREATE TABLE IF NOT EXISTS feedback_reports (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id           INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+                reporter_id        INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                reported_player_id INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                issue_type         TEXT NOT NULL,
+                comment            TEXT,
+                thread_id          INTEGER,
+                created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_fr_match    ON feedback_reports(match_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fr_reported ON feedback_reports(reported_player_id)",
         ]
         with self.connection:
             for stmt in stmts:
@@ -133,6 +146,7 @@ class DatabaseOperations:
 
     def _migrate(self):
         migrations = [
+            # existing migrations — safe no-ops if already applied
             "ALTER TABLE queue_entries ADD COLUMN quick_start INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE servers ADD COLUMN role_drs7  INTEGER",
             "ALTER TABLE servers ADD COLUMN role_drs8  INTEGER",
@@ -141,6 +155,19 @@ class DatabaseOperations:
             "ALTER TABLE servers ADD COLUMN role_drs11 INTEGER",
             "ALTER TABLE servers ADD COLUMN role_drs12 INTEGER",
             "ALTER TABLE queue_entries ADD COLUMN queue_guild_id INTEGER",
+            # NEW: feedback_reports (safe no-op if _create_tables already made it)
+            """CREATE TABLE IF NOT EXISTS feedback_reports (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id           INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+                reporter_id        INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                reported_player_id INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                issue_type         TEXT NOT NULL,
+                comment            TEXT,
+                thread_id          INTEGER,
+                created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_fr_match    ON feedback_reports(match_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fr_reported ON feedback_reports(reported_player_id)",
         ]
         for stmt in migrations:
             try:
@@ -394,7 +421,6 @@ class DatabaseOperations:
             participant_ids, fetch_all=True
         )
         if not rows:
-            # Fallback: use user_servers last_seen
             result = {}
             for pid in participant_ids:
                 guilds = self.get_user_guilds(pid)
@@ -423,6 +449,8 @@ class DatabaseOperations:
         )
         return row["match_id"] if row else None
 
+    # ------------------------------------------------------------------ feedback
+
     def save_feedback(self, match_id: int, discord_id: int, was_positive: bool) -> bool:
         return self._execute(
             """INSERT INTO feedback (match_id, discord_id, was_positive) VALUES (?, ?, ?)
@@ -430,10 +458,50 @@ class DatabaseOperations:
             (match_id, discord_id, 1 if was_positive else 0)
         ) is not None
 
+    def has_submitted_feedback(self, match_id: int, discord_id: int) -> bool:
+        """True if this user has already submitted any feedback for this match."""
+        row = self._execute(
+            "SELECT 1 FROM feedback WHERE match_id = ? AND discord_id = ?",
+            (match_id, discord_id), fetch_one=True
+        )
+        return row is not None
+
     def get_match_feedback(self, match_id: int) -> list[dict]:
         return self._execute(
             """SELECT f.discord_id, u.display_name, f.was_positive, f.submitted_at
                FROM feedback f JOIN users u ON u.discord_id = f.discord_id
                WHERE f.match_id = ?""",
+            (match_id,), fetch_all=True
+        ) or []
+
+    # ------------------------------------------------------------------ feedback_reports
+
+    def save_feedback_report(
+        self,
+        match_id: int,
+        reporter_id: int,
+        reported_player_id: int,
+        issue_type: str,
+        comment: str | None,
+        thread_id: int | None,
+    ) -> bool:
+        return self._execute(
+            """INSERT INTO feedback_reports
+               (match_id, reporter_id, reported_player_id, issue_type, comment, thread_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (match_id, reporter_id, reported_player_id, issue_type, comment or None, thread_id)
+        ) is not None
+
+    def get_feedback_reports_for_match(self, match_id: int) -> list[dict]:
+        return self._execute(
+            """SELECT fr.id, fr.issue_type, fr.comment, fr.thread_id, fr.created_at,
+                      ur.display_name AS reporter_name,
+                      up.display_name AS reported_name,
+                      fr.reporter_id, fr.reported_player_id
+               FROM feedback_reports fr
+               JOIN users ur ON ur.discord_id = fr.reporter_id
+               JOIN users up ON up.discord_id = fr.reported_player_id
+               WHERE fr.match_id = ?
+               ORDER BY fr.created_at ASC""",
             (match_id,), fetch_all=True
         ) or []
