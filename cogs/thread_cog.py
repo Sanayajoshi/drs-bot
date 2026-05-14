@@ -5,6 +5,7 @@ from discord.ext import commands
 import config
 from services.thread_service import ThreadService
 from services.i18n import get as t
+from datetime import datetime, timezone
 
 logger = logging.getLogger("thread_cog")
 BELL_TIMEOUT_MINS  = 15
@@ -14,6 +15,23 @@ EMOJI_GENESIS = "<:Genesis:1409872792211554365>"
 EMOJI_ENRICH  = "<:Enrich:1409872795600424960>"
 EMOJI_RSE     = "<:ModTRSE:1256962175398842399>"
 EMOJI_LOW     = "<:modlow:1490529960899772516>"
+
+
+def _format_timedelta(expires_at: datetime) -> str:
+    """Return a human-friendly remaining time string, e.g. '2h 15m'."""
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    delta = expires_at - now
+    total_secs = max(0, int(delta.total_seconds()))
+    hours, remainder = divmod(total_secs, 3600)
+    mins = remainder // 60
+    if hours and mins:
+        return f"{hours}h {mins}m"
+    if hours:
+        return f"{hours}h"
+    return f"{mins}m"
+
 
 class ThreadCog(commands.Cog):
     def __init__(self, bot):
@@ -32,41 +50,41 @@ class ThreadCog(commands.Cog):
     async def on_drs_create_threads(self, match_id: int, drs_level: int, participants: list[dict]):
         participant_ids = [p["discord_id"] for p in participants]
 
-        # Get which guild each participant queued from
+        # queue_guild_id is now stored on match_participants — reliable after queue deletion
         queue_guild_map = self.bot.db.get_participant_queue_guilds(participant_ids)
 
-        # Collect the unique guilds where at least one participant queued from
-        # and group participants per that guild (for mentions)
+        # Group participants by the guild they queued from
         guild_to_pids: dict[int, list[int]] = {}
         for pid in participant_ids:
             g = queue_guild_map.get(pid)
             if g:
                 guild_to_pids.setdefault(g, []).append(pid)
 
-        # Fallback: if nobody has a queue_guild recorded, put everyone in their first known guild
+        # Fallback: no recorded queue guild — use first known guild
         if not guild_to_pids:
             for pid in participant_ids:
                 guilds = self.bot.db.get_user_guilds(pid)
                 if guilds:
                     guild_to_pids.setdefault(guilds[0], []).append(pid)
 
-        # Build discord_id -> guild_name (corp) using user_servers display info
+        # discord_id → corp name (the guild name they queued from)
         id_to_corp: dict[int, str] = {}
         for pid in participant_ids:
-            guilds = self.bot.db.get_user_guilds(pid)
-            if guilds:
-                g = self.bot.get_guild(guilds[0])
+            g_id = queue_guild_map.get(pid)
+            if g_id:
+                g = self.bot.get_guild(g_id)
+                id_to_corp[pid] = g.name if g else "Unknown"
+            else:
+                guilds = self.bot.db.get_user_guilds(pid)
+                g = self.bot.get_guild(guilds[0]) if guilds else None
                 id_to_corp[pid] = g.name if g else "Unknown"
 
-        # GEN/ENR assignment — highest level wins each role
+        # GEN/ENR assignment — all players tied at the highest level get the role icon
         gen_players = [p for p in participants if p.get("genesis_level") is not None]
         enr_players = [p for p in participants if p.get("enrich_level") is not None]
-        #gen_best_id = max(gen_players, key=lambda p: p["genesis_level"])["discord_id"] if gen_players else None
-        #enr_best_id = max(enr_players, key=lambda p: p["enrich_level"])["discord_id"] if enr_players else None
 
-        # CHANGED: support ties by collecting ALL players with max level
-        gen_best_ids = set()
-        enr_best_ids = set()
+        gen_best_ids: set[int] = set()
+        enr_best_ids: set[int] = set()
 
         if gen_players:
             max_gen = max(p["genesis_level"] for p in gen_players)
@@ -76,7 +94,8 @@ class ThreadCog(commands.Cog):
             max_enr = max(p["enrich_level"] for p in enr_players)
             enr_best_ids = {p["discord_id"] for p in enr_players if p["enrich_level"] == max_enr}
 
-
+        # Fetch active corp bonuses once for all threads
+        active_bonuses = self.bot.db.get_active_corp_bonuses()
 
         created_threads: list[dict] = []
 
@@ -99,15 +118,26 @@ class ThreadCog(commands.Cog):
                     type=discord.ChannelType.public_thread,
                 )
 
-                embed = self._build_match_embed(
+                match_embed = self._build_match_embed(
                     match_id, drs_level, participants, id_to_corp,
                     gen_best_ids, enr_best_ids, lang
                 )
                 bell_view = self.thread_service.build_bell_view(match_id)
 
-                # Plain text proceed line first — shows in push notifications
                 proceed = t(lang, "match_proceed", level=drs_level)
-                await thread.send(content=f"{mentions}\n{proceed}", embed=embed, view=bell_view)
+
+                # Build bonus embed if there are active bonuses
+                bonus_embed = self._build_bonus_embed(active_bonuses, lang)
+
+                embeds = [match_embed]
+                if bonus_embed:
+                    embeds.append(bonus_embed)
+
+                await thread.send(
+                    content=f"{mentions}\n{proceed}",
+                    embeds=embeds,
+                    view=bell_view,
+                )
 
                 self.bot.db.save_match_thread(match_id, guild_id, thread.id)
                 created_threads.append({"guild_id": guild_id, "thread_id": thread.id, "lang": lang})
@@ -124,7 +154,7 @@ class ThreadCog(commands.Cog):
             self.bot.loop.create_task(self._schedule_feedback(match_id, created_threads))
 
     # ------------------------------------------------------------------
-    # Match embed — clean table format
+    # Match embed
     # ------------------------------------------------------------------
 
     def _build_match_embed(
@@ -133,8 +163,8 @@ class ThreadCog(commands.Cog):
         drs_level: int,
         participants: list[dict],
         id_to_corp: dict[int, str],
-        gen_best_ids: set[int],  # CHANGED
-        enr_best_ids: set[int],  # CHANGED
+        gen_best_ids: set[int],
+        enr_best_ids: set[int],
         lang: str,
     ) -> discord.Embed:
         embed = discord.Embed(
@@ -142,27 +172,19 @@ class ThreadCog(commands.Cog):
             color=discord.Color.dark_red()
         )
 
-        # Table header
-        header = f"`{'Name':<15} {'Corp':<15}` {EMOJI_GENESIS}  {EMOJI_ENRICH}  {EMOJI_RSE}"
-        rows   = [header, "`" + "─" * 38 + "`"]
-        rows   = []
+        rows = []
         for p in participants:
-            pid      = p["discord_id"]
-            name     = p["display_name"][:10]
-            corp     = id_to_corp.get(pid, "Unknown")[:10]
-            gen_lvl  = p.get("genesis_level")
-            enr_lvl  = p.get("enrich_level")
-            rse_lvl  = p.get("modt_level")
+            pid     = p["discord_id"]
+            name    = p["display_name"][:10]
+            corp    = id_to_corp.get(pid, "Unknown")[:10]
+            gen_lvl = p.get("genesis_level")
+            enr_lvl = p.get("enrich_level")
+            rse_lvl = p.get("modt_level")
 
             gen_str = str(gen_lvl) if gen_lvl is not None else "?"
             enr_str = str(enr_lvl) if enr_lvl is not None else "?"
             rse_str = str(rse_lvl) if rse_lvl is not None else "?"
 
-            # Role icon prefix: only show icon for assigned player
-            # gen_icon = EMOJI_GENESIS if pid == gen_best_id else "🚫"
-            # enr_icon = EMOJI_ENRICH  if pid == enr_best_id else "🚫"
-
-            # CHANGED: check membership in set instead of single ID
             gen_icon = EMOJI_GENESIS if pid in gen_best_ids else EMOJI_LOW
             enr_icon = EMOJI_ENRICH  if pid in enr_best_ids else EMOJI_LOW
 
@@ -171,7 +193,6 @@ class ThreadCog(commands.Cog):
 
         embed.add_field(name="\u200b", value="\n".join(rows), inline=False)
 
-        # Compact warning — only if someone is missing tech
         missing = [p for p in participants if p.get("genesis_level") is None or p.get("enrich_level") is None]
         if missing:
             names = ", ".join(p["display_name"] for p in missing)
@@ -179,6 +200,36 @@ class ThreadCog(commands.Cog):
             embed.add_field(name="\u200b", value=f"-# {t(lang, key, names=names)}", inline=False)
 
         embed.set_footer(text=t(lang, "match_footer"))
+        return embed
+
+    # ------------------------------------------------------------------
+    # Corp bonus embed — top 3 active bonuses, warns if < 1 hour
+    # ------------------------------------------------------------------
+
+    def _build_bonus_embed(self, active_bonuses: list[dict], lang: str) -> discord.Embed | None:
+        if not active_bonuses:
+            return None
+
+        top3 = active_bonuses[:3]
+        embed = discord.Embed(
+            title="🌟 Active Corp Bonuses",
+            color=discord.Color.gold(),
+        )
+
+        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        lines = []
+        for b in top3:
+            expires_at = b["expires_at"]
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            remaining_secs = (expires_at - now).total_seconds()
+            time_str = _format_timedelta(expires_at)
+            warning  = " ⚠️ expiring soon!" if remaining_secs < 3600 else ""
+            lines.append(
+                f"**{b['corp_name']}** — **{b['bonus_pct']}%** bonus · expires in {time_str}{warning}"
+            )
+
+        embed.description = "\n".join(lines)
         return embed
 
     # ------------------------------------------------------------------
@@ -256,6 +307,7 @@ class ThreadCog(commands.Cog):
 
     # ------------------------------------------------------------------
     # Message relay between servers
+    # Format: author = "PlayerName[CorpName]", footer = original text
     # ------------------------------------------------------------------
 
     @commands.Cog.listener()
@@ -267,22 +319,40 @@ class ThreadCog(commands.Cog):
         match_id = self.bot.db.get_match_id_by_thread(message.channel.id)
         if not match_id:
             return
+
         source_guild_id = message.guild.id
         source_server   = self.bot.db.get_server(source_guild_id)
         source_lang     = source_server.get("language", "en") if source_server else "en"
-        all_threads     = self.bot.db.get_match_threads(match_id)
+
+        # Corp name for the sender = the guild name they're posting from
+        source_guild = self.bot.get_guild(source_guild_id)
+        corp_name    = source_guild.name if source_guild else "Unknown"
+        author_label = f"{message.author.display_name}[{corp_name}]"
+
+        all_threads = self.bot.db.get_match_threads(match_id)
 
         for thread_info in all_threads:
             if thread_info["guild_id"] == source_guild_id:
                 continue
+
             target_server = self.bot.db.get_server(thread_info["guild_id"])
             target_lang   = target_server.get("language", "en") if target_server else "en"
+
             content = message.content
+
+            # Translate only if languages differ
             if source_lang != target_lang:
-                content = await self.thread_service.translate(content, source_lang, target_lang)
-            embed = discord.Embed(description=content, color=discord.Color.dark_gray())
-            embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
-            embed.set_footer(text=message.guild.name)
+                translated = await self.thread_service.translate(content, source_lang, target_lang)
+                embed = discord.Embed(description=translated, color=discord.Color.dark_gray())
+                embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+                # Show original message in footer when translation happened
+                if translated != content:
+                    footer_text = content[:200] + ("…" if len(content) > 200 else "")
+                    embed.set_footer(text=f"Original: {footer_text}")
+            else:
+                embed = discord.Embed(description=content, color=discord.Color.dark_gray())
+                embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+
             try:
                 target_thread = await self.bot.fetch_channel(thread_info["thread_id"])
                 await target_thread.send(embed=embed)

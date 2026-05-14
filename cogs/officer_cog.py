@@ -1,11 +1,130 @@
 import logging
 import discord
-from discord import app_commands
+from discord import app_commands, ui
 from discord.ext import commands
+from datetime import datetime, timezone, timedelta
 import config
 
 logger = logging.getLogger("officer_cog")
 
+
+# ---------------------------------------------------------------------------
+# Corp Bonus Modal
+# ---------------------------------------------------------------------------
+
+class BonusModal(ui.Modal, title="Set Corp Bonus"):
+    bonus_pct = ui.TextInput(
+        label="Bonus Percentage (whole number, e.g. 15)",
+        placeholder="15",
+        min_length=1,
+        max_length=3,
+        required=True,
+    )
+    expires_days = ui.TextInput(
+        label="Expires in — Days",
+        placeholder="0",
+        min_length=1,
+        max_length=3,
+        required=True,
+    )
+    expires_hours = ui.TextInput(
+        label="Expires in — Hours (0–23)",
+        placeholder="12",
+        min_length=1,
+        max_length=2,
+        required=True,
+    )
+
+    def __init__(self, guild_id: int, corp_name: str):
+        super().__init__()
+        self.guild_id  = guild_id
+        self.corp_name = corp_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Validate bonus_pct
+        try:
+            pct = int(self.bonus_pct.value.strip())
+            if pct <= 0:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Bonus percentage must be a positive whole number.", ephemeral=True
+            )
+            return
+
+        # Validate days and hours
+        try:
+            days  = int(self.expires_days.value.strip())
+            hours = int(self.expires_hours.value.strip())
+            if days < 0 or hours < 0 or hours > 23:
+                raise ValueError
+            if days == 0 and hours == 0:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Enter valid days (≥0) and hours (0–23). Total must be at least 1 hour.", ephemeral=True
+            )
+            return
+
+        expires_at = datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(days=days, hours=hours)
+
+        saved = interaction.client.db.upsert_corp_bonus(
+            guild_id   = self.guild_id,
+            corp_name  = self.corp_name,
+            bonus_pct  = pct,
+            expires_at = expires_at,
+        )
+
+        if not saved:
+            await interaction.response.send_message("❌ Failed to save bonus. Try again.", ephemeral=True)
+            return
+
+        # Discord timestamp for expiry
+        ts = int(expires_at.timestamp())
+        await interaction.response.send_message(
+            f"✅ **{self.corp_name}** bonus set to **{pct}%** — expires <t:{ts}:R> (<t:{ts}:f>).",
+            ephemeral=True,
+        )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        logger.error(f"BonusModal error: {error}", exc_info=True)
+        await interaction.response.send_message("❌ Something went wrong.", ephemeral=True)
+
+
+# ---------------------------------------------------------------------------
+# Corp selector view — shown before the modal
+# ---------------------------------------------------------------------------
+
+class CorpSelectView(ui.View):
+    def __init__(self, guilds: list[discord.Guild]):
+        super().__init__(timeout=60)
+        # Limit to 20 corps
+        options = [
+            discord.SelectOption(label=g.name[:100], value=str(g.id))
+            for g in guilds[:20]
+        ]
+        select = ui.Select(
+            placeholder="Select a corp to set bonus for…",
+            options=options,
+            min_values=1,
+            max_values=1,
+            custom_id="corp_bonus_select",
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+        self._guilds = {str(g.id): g for g in guilds}
+
+    async def _on_select(self, interaction: discord.Interaction):
+        guild_id  = int(interaction.data["values"][0])
+        guild     = self._guilds.get(str(guild_id))
+        corp_name = guild.name if guild else "Unknown"
+        modal     = BonusModal(guild_id=guild_id, corp_name=corp_name)
+        await interaction.response.send_modal(modal)
+
+
+# ---------------------------------------------------------------------------
+# Cog
+# ---------------------------------------------------------------------------
 
 class OfficerCog(commands.Cog):
     def __init__(self, bot):
@@ -24,7 +143,7 @@ class OfficerCog(commands.Cog):
     drs = app_commands.Group(name="officer", description="DRS officer commands")
 
     # ------------------------------------------------------------------
-    # /officer stats — overall match summary
+    # /officer stats
     # ------------------------------------------------------------------
 
     @drs.command(name="stats", description="Overall match statistics")
@@ -61,7 +180,7 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
-    # /officer servers — list all guilds the bot is installed on
+    # /officer servers  — FIX: language now read from get_all_servers()
     # ------------------------------------------------------------------
 
     @drs.command(name="servers", description="List all servers the bot is installed on")
@@ -72,6 +191,7 @@ class OfficerCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         guilds = self.bot.guilds
+        # get_all_servers now returns language among its columns
         db_servers = {s["guild_id"]: s for s in self.bot.db.get_all_servers()}
 
         embed = discord.Embed(
@@ -89,7 +209,6 @@ class OfficerCog(commands.Cog):
                 f"-# {guild.member_count:,} members · lang: `{lang}`"
             )
 
-        # Discord embed field value cap is 1024 chars — chunk if needed
         chunk, chunks = [], []
         for line in lines:
             chunk.append(line)
@@ -109,7 +228,7 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
-    # /officer match <id> — details on a specific match
+    # /officer match <id>
     # ------------------------------------------------------------------
 
     @drs.command(name="match", description="Details for a specific match ID")
@@ -157,7 +276,7 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
-    # /officer level <7-12> — recent matches for a DRS level
+    # /officer level
     # ------------------------------------------------------------------
 
     @drs.command(name="level", description="Recent matches for a specific DRS level")
@@ -193,7 +312,7 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
-    # /officer players — most active players
+    # /officer players
     # ------------------------------------------------------------------
 
     @drs.command(name="players", description="Most active players by match count")
@@ -232,7 +351,7 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
-    # /officer queue — current queue snapshot
+    # /officer queue
     # ------------------------------------------------------------------
 
     @drs.command(name="queue", description="Snapshot of the current queue across all levels")
@@ -255,6 +374,80 @@ class OfficerCog(commands.Cog):
                             value="\n".join(lines), inline=False)
         if not any_found:
             embed.description = "Queue is empty."
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # /officer bonus set — select corp from dropdown, then fill modal
+    # ------------------------------------------------------------------
+
+    bonus_group = app_commands.Group(
+        name="bonus",
+        description="Manage corp bonuses",
+        parent=None,  # will be nested under /officer
+    )
+
+    @drs.command(name="bonus_set", description="Set or update a corp's active bonus")
+    async def bonus_set(self, interaction: discord.Interaction):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+
+        guilds = self.bot.guilds
+        if not guilds:
+            await interaction.response.send_message("❌ No corps (servers) found.", ephemeral=True)
+            return
+
+        view = CorpSelectView(list(guilds))
+        await interaction.response.send_message(
+            "Select the corp to set a bonus for:",
+            view=view,
+            ephemeral=True,
+        )
+
+    # ------------------------------------------------------------------
+    # /officer bonus_list — show all bonuses (active + expired)
+    # ------------------------------------------------------------------
+
+    @drs.command(name="bonus_list", description="List all corp bonuses (active and expired)")
+    async def bonus_list(self, interaction: discord.Interaction):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        bonuses = self.bot.db.get_all_corp_bonuses()
+        now     = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+        embed = discord.Embed(title="🌟 Corp Bonuses", color=discord.Color.gold())
+        if not bonuses:
+            embed.description = "No bonuses have been set yet."
+        else:
+            active_lines  = []
+            expired_lines = []
+            for b in bonuses:
+                expires_at = b["expires_at"]
+                if expires_at and expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                ts = int(expires_at.timestamp()) if expires_at else 0
+                line = f"**{b['corp_name']}** — **{b['bonus_pct']}%** · expires <t:{ts}:R>"
+                if expires_at and expires_at > now:
+                    active_lines.append("🟢 " + line)
+                else:
+                    expired_lines.append("🔴 " + line)
+
+            if active_lines:
+                embed.add_field(
+                    name="Active",
+                    value="\n".join(active_lines),
+                    inline=False,
+                )
+            if expired_lines:
+                embed.add_field(
+                    name="Expired",
+                    value="\n".join(expired_lines),
+                    inline=False,
+                )
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 

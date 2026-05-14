@@ -36,10 +36,13 @@ class QueueService:
         two = entries[:2]
         participant_ids = [e["discord_id"] for e in two]
 
+        # Capture queue_guild_id BEFORE deleting entries
+        queue_guild_map = self._capture_queue_guilds(participant_ids, drs_level)
+
         for pid in participant_ids:
             self.db.leave_queue(pid)
 
-        match_id = self.db.create_match(drs_level, participant_ids)
+        match_id = self.db.create_match(drs_level, participant_ids, queue_guild_map)
         if not match_id:
             logger.error(f"quick_start_match: failed to create match for DRS{drs_level}")
             return "db_error"
@@ -59,10 +62,13 @@ class QueueService:
     async def _form_match(self, drs_level: int, entries: list[dict]):
         participant_ids = [e["discord_id"] for e in entries]
 
+        # Capture queue_guild_id BEFORE deleting entries
+        queue_guild_map = self._capture_queue_guilds(participant_ids, drs_level)
+
         for pid in participant_ids:
             self.db.leave_queue(pid)
 
-        match_id = self.db.create_match(drs_level, participant_ids)
+        match_id = self.db.create_match(drs_level, participant_ids, queue_guild_map)
         if not match_id:
             logger.error(f"Failed to create match record for DRS{drs_level}")
             return
@@ -76,3 +82,24 @@ class QueueService:
             self._dispatch("drs_match_formed", match_id, drs_level, participants)
         else:
             logger.error("QueueService has no dispatch function — match event lost!")
+
+    def _capture_queue_guilds(self, participant_ids: list[int], drs_level: int) -> dict[int, int]:
+        """
+        Read queue_guild_id from queue_entries for each participant RIGHT NOW,
+        before the entries are deleted. Returns {discord_id: queue_guild_id}.
+        """
+        if not participant_ids:
+            return {}
+        placeholders = ",".join(["?"] * len(participant_ids))
+        rows = self.db._execute(
+            f"""SELECT discord_id, queue_guild_id FROM queue_entries
+                WHERE discord_id IN ({placeholders}) AND drs_level = ?""",
+            participant_ids + [drs_level],
+            fetch_all=True,
+        )
+        result = {}
+        if rows:
+            for r in rows:
+                if r.get("queue_guild_id"):
+                    result[r["discord_id"]] = r["queue_guild_id"]
+        return result

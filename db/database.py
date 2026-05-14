@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import config
 
 
@@ -101,10 +101,12 @@ class DatabaseOperations:
                 status     TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )""",
+            # queue_guild_id stored here so it survives queue entry deletion
             """CREATE TABLE IF NOT EXISTS match_participants (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
-                discord_id INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id       INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+                discord_id     INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                queue_guild_id INTEGER,
                 UNIQUE (match_id, discord_id)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_mp_match ON match_participants(match_id)",
@@ -126,7 +128,6 @@ class DatabaseOperations:
                 UNIQUE (match_id, discord_id)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_fb_match ON feedback(match_id)",
-            # NEW: structured per-player reports
             """CREATE TABLE IF NOT EXISTS feedback_reports (
                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
                 match_id           INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
@@ -139,6 +140,18 @@ class DatabaseOperations:
             )""",
             "CREATE INDEX IF NOT EXISTS idx_fr_match    ON feedback_reports(match_id)",
             "CREATE INDEX IF NOT EXISTS idx_fr_reported ON feedback_reports(reported_player_id)",
+            # Corp bonuses — one active bonus per guild at a time
+            """CREATE TABLE IF NOT EXISTS corp_bonuses (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL REFERENCES servers(guild_id) ON DELETE CASCADE,
+                corp_name   TEXT NOT NULL,
+                bonus_pct   INTEGER NOT NULL,
+                expires_at  TEXT NOT NULL,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (guild_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_cb_guild   ON corp_bonuses(guild_id)",
+            "CREATE INDEX IF NOT EXISTS idx_cb_expires ON corp_bonuses(expires_at)",
         ]
         with self.connection:
             for stmt in stmts:
@@ -155,7 +168,9 @@ class DatabaseOperations:
             "ALTER TABLE servers ADD COLUMN role_drs11 INTEGER",
             "ALTER TABLE servers ADD COLUMN role_drs12 INTEGER",
             "ALTER TABLE queue_entries ADD COLUMN queue_guild_id INTEGER",
-            # NEW: feedback_reports (safe no-op if _create_tables already made it)
+            # Store queue_guild_id on match_participants so it survives queue deletion
+            "ALTER TABLE match_participants ADD COLUMN queue_guild_id INTEGER",
+            # feedback_reports
             """CREATE TABLE IF NOT EXISTS feedback_reports (
                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
                 match_id           INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
@@ -168,6 +183,18 @@ class DatabaseOperations:
             )""",
             "CREATE INDEX IF NOT EXISTS idx_fr_match    ON feedback_reports(match_id)",
             "CREATE INDEX IF NOT EXISTS idx_fr_reported ON feedback_reports(reported_player_id)",
+            # corp_bonuses
+            """CREATE TABLE IF NOT EXISTS corp_bonuses (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL REFERENCES servers(guild_id) ON DELETE CASCADE,
+                corp_name   TEXT NOT NULL,
+                bonus_pct   INTEGER NOT NULL,
+                expires_at  TEXT NOT NULL,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (guild_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_cb_guild   ON corp_bonuses(guild_id)",
+            "CREATE INDEX IF NOT EXISTS idx_cb_expires ON corp_bonuses(expires_at)",
         ]
         for stmt in migrations:
             try:
@@ -223,8 +250,11 @@ class DatabaseOperations:
         )
 
     def get_all_servers(self) -> list[dict]:
+        # FIX: now fetches all columns including language so /officer servers shows correct language
         return self._execute(
-            "SELECT guild_id, queue_channel_id, queue_message_id FROM servers",
+            """SELECT guild_id, queue_channel_id, queue_message_id,
+                      notification_channel_id, language
+               FROM servers""",
             fetch_all=True
         ) or []
 
@@ -376,7 +406,13 @@ class DatabaseOperations:
         )
         return [r["drs_level"] for r in rows] if rows else []
 
-    def create_match(self, drs_level: int, participant_ids: list[int]) -> int | None:
+    def create_match(self, drs_level: int, participant_ids: list[int],
+                     queue_guild_map: dict[int, int] | None = None) -> int | None:
+        """
+        Create a match and record participants.
+        queue_guild_map: {discord_id: queue_guild_id} — captured from queue_entries
+        BEFORE they are deleted, so we preserve which guild each player joined from.
+        """
         if not self.connection:
             return None
         try:
@@ -385,10 +421,13 @@ class DatabaseOperations:
                     "INSERT INTO matches (drs_level) VALUES (?)", (drs_level,)
                 )
                 match_id = cur.lastrowid
-                self.connection.executemany(
-                    "INSERT INTO match_participants (match_id, discord_id) VALUES (?, ?)",
-                    [(match_id, uid) for uid in participant_ids]
-                )
+                for uid in participant_ids:
+                    guild_id = (queue_guild_map or {}).get(uid)
+                    self.connection.execute(
+                        """INSERT INTO match_participants (match_id, discord_id, queue_guild_id)
+                           VALUES (?, ?, ?)""",
+                        (match_id, uid, guild_id)
+                    )
             return match_id
         except Exception as e:
             self.logger.error(f"create_match failed: {e}", exc_info=True)
@@ -396,11 +435,34 @@ class DatabaseOperations:
 
     def get_match_participants(self, match_id: int) -> list[dict]:
         return self._execute(
-            """SELECT mp.discord_id, u.display_name, u.genesis_level, u.enrich_level, u.modt_level
+            """SELECT mp.discord_id, u.display_name, u.genesis_level, u.enrich_level, u.modt_level,
+                      mp.queue_guild_id
                FROM match_participants mp JOIN users u ON u.discord_id = mp.discord_id
                WHERE mp.match_id = ?""",
             (match_id,), fetch_all=True
         ) or []
+
+    def get_participant_queue_guilds(self, participant_ids: list[int]) -> dict[int, int]:
+        """
+        Returns {discord_id: queue_guild_id} sourced from match_participants.queue_guild_id.
+        Falls back to user_servers if not set.
+        """
+        if not participant_ids:
+            return {}
+        placeholders = ",".join(["?"] * len(participant_ids))
+        rows = self._execute(
+            f"""SELECT discord_id, queue_guild_id FROM match_participants
+                WHERE discord_id IN ({placeholders}) AND queue_guild_id IS NOT NULL""",
+            participant_ids, fetch_all=True
+        )
+        result = {r["discord_id"]: r["queue_guild_id"] for r in rows} if rows else {}
+        # Fill in any missing via user_servers fallback
+        for pid in participant_ids:
+            if pid not in result:
+                guilds = self.get_user_guilds(pid)
+                if guilds:
+                    result[pid] = guilds[0]
+        return result
 
     def get_user_match_count(self, discord_id: int, drs_level: int) -> int:
         row = self._execute(
@@ -410,24 +472,6 @@ class DatabaseOperations:
             (discord_id, drs_level), fetch_one=True
         )
         return row["cnt"] if row else 0
-
-    def get_participant_queue_guilds(self, participant_ids: list[int]) -> dict[int, int]:
-        """Returns {discord_id: queue_guild_id} for each participant — the guild they queued from."""
-        if not participant_ids:
-            return {}
-        placeholders = ",".join(["?"] * len(participant_ids))
-        rows = self._execute(
-            f"SELECT discord_id, queue_guild_id FROM queue_entries WHERE discord_id IN ({placeholders})",
-            participant_ids, fetch_all=True
-        )
-        if not rows:
-            result = {}
-            for pid in participant_ids:
-                guilds = self.get_user_guilds(pid)
-                if guilds:
-                    result[pid] = guilds[0]
-            return result
-        return {r["discord_id"]: r["queue_guild_id"] for r in rows if r["queue_guild_id"]}
 
     def save_match_thread(self, match_id: int, guild_id: int, thread_id: int) -> bool:
         return self._execute(
@@ -459,7 +503,6 @@ class DatabaseOperations:
         ) is not None
 
     def has_submitted_feedback(self, match_id: int, discord_id: int) -> bool:
-        """True if this user has already submitted any feedback for this match."""
         row = self._execute(
             "SELECT 1 FROM feedback WHERE match_id = ? AND discord_id = ?",
             (match_id, discord_id), fetch_one=True
@@ -505,3 +548,57 @@ class DatabaseOperations:
                ORDER BY fr.created_at ASC""",
             (match_id,), fetch_all=True
         ) or []
+
+    # ------------------------------------------------------------------ corp_bonuses
+
+    def upsert_corp_bonus(self, guild_id: int, corp_name: str, bonus_pct: int,
+                          expires_at: datetime) -> bool:
+        """Insert or replace the bonus for a guild (one bonus per guild)."""
+        expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S")
+        return self._execute(
+            """INSERT INTO corp_bonuses (guild_id, corp_name, bonus_pct, expires_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(guild_id) DO UPDATE SET
+                 corp_name  = excluded.corp_name,
+                 bonus_pct  = excluded.bonus_pct,
+                 expires_at = excluded.expires_at,
+                 created_at = datetime('now')""",
+            (guild_id, corp_name, bonus_pct, expires_str)
+        ) is not None
+
+    def get_active_corp_bonuses(self) -> list[dict]:
+        """All bonuses that have not yet expired, ordered by bonus_pct descending."""
+        rows = self._execute(
+            """SELECT cb.guild_id, cb.corp_name, cb.bonus_pct, cb.expires_at
+               FROM corp_bonuses cb
+               WHERE cb.expires_at > datetime('now')
+               ORDER BY cb.bonus_pct DESC""",
+            fetch_all=True
+        ) or []
+        return [
+            {
+                "guild_id":  r["guild_id"],
+                "corp_name": r["corp_name"],
+                "bonus_pct": r["bonus_pct"],
+                "expires_at": _parse_dt(r["expires_at"]),
+            }
+            for r in rows
+        ]
+
+    def get_all_corp_bonuses(self) -> list[dict]:
+        """All bonuses including expired ones — for the /officer bonus list command."""
+        rows = self._execute(
+            """SELECT guild_id, corp_name, bonus_pct, expires_at
+               FROM corp_bonuses
+               ORDER BY bonus_pct DESC""",
+            fetch_all=True
+        ) or []
+        return [
+            {
+                "guild_id":  r["guild_id"],
+                "corp_name": r["corp_name"],
+                "bonus_pct": r["bonus_pct"],
+                "expires_at": _parse_dt(r["expires_at"]),
+            }
+            for r in rows
+        ]
