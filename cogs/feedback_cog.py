@@ -306,7 +306,7 @@ class FeedbackCog(commands.Cog):
             )
 
     # ------------------------------------------------------------------
-    # Officer alert
+    # Officer alert (Broadcasts to all involved servers)
     # ------------------------------------------------------------------
 
     async def _send_officer_alert(
@@ -319,16 +319,19 @@ class FeedbackCog(commands.Cog):
         comment: str | None,
         thread_id: int | None,
     ):
-        lang   = self._lang(interaction.guild_id)
-        server = self.bot.db.get_server(interaction.guild_id)
-        if not server or not server.get("officer_channel_id"):
+        # Fetch participants to find which home guilds are represented in this run
+        participants = self.bot.db.get_match_participants(match_id)
+        if not participants:
             return
 
-        guild   = self.bot.get_guild(interaction.guild_id)
-        channel = guild and guild.get_channel(server["officer_channel_id"])
-        if not channel:
-            return
+        # Gather unique guild IDs represented by the players
+        involved_guild_ids = {p["queue_guild_id"] for p in participants if p.get("queue_guild_id")}
 
+        # Always include the guild where the report was actually filed
+        if interaction.guild_id:
+            involved_guild_ids.add(interaction.guild_id)
+
+        # Retrieve match specifications
         match_info  = self.bot.db._execute(
             "SELECT drs_level FROM matches WHERE id = ?", (match_id,), fetch_one=True
         )
@@ -336,24 +339,40 @@ class FeedbackCog(commands.Cog):
         issue_label = ISSUE_LABELS.get(issue_type, issue_type)
         thread_ref  = f"<#{thread_id}>" if thread_id else "*(no thread)*"
 
-        embed = discord.Embed(
-            title       = t(lang, "officer_alert_title"),
-            color       = discord.Color.red(),
-            description = f"A pilot filed a report for **Match #{match_id}** (DRS{drs_level}).",
-        )
-        embed.add_field(name="Reported Player", value=f"**{reported_name}** (<@{reported_id}>)",                     inline=True)
-        embed.add_field(name="Reported By",     value=f"{interaction.user.display_name} (<@{interaction.user.id}>)", inline=True)
-        embed.add_field(name="Issue",           value=issue_label,                                                   inline=True)
-        embed.add_field(name="Thread",          value=thread_ref,                                                    inline=True)
-        embed.add_field(name="Match ID",        value=str(match_id),                                                 inline=True)
+        # Broadcast the alert to each involved guild's officer channel
+        for guild_id in involved_guild_ids:
+            server = self.bot.db.get_server(guild_id)
+            if not server or not server.get("officer_channel_id"):
+                continue
 
-        if comment:
-            embed.add_field(name="Comment", value=comment[:1024], inline=False)
+            guild = self.bot.get_guild(guild_id)
+            channel = guild and guild.get_channel(server["officer_channel_id"])
+            if not channel:
+                continue
 
-        try:
-            await channel.send(embed=embed)
-        except Exception as e:
-            logger.error(f"Failed to send officer alert: {e}")
+            lang = server.get("language", "en")
+
+            # Construct localized alert embed
+            embed = discord.Embed(
+                title       = t(lang, "officer_alert_title"),
+                color       = discord.Color.red(),
+                description = f"A pilot filed a report for **Match #{match_id}** (DRS{drs_level}).",
+            )
+            embed.add_field(name="Reported Player", value=f"**{reported_name}** (<@{reported_id}>)",                     inline=True)
+            embed.add_field(name="Reported By",     value=f"{interaction.user.display_name} (<@{interaction.user.id}>)", inline=True)
+            embed.add_field(name="Issue",           value=issue_label,                                                   inline=True)
+            embed.add_field(name="Thread",          value=thread_ref,                                                    inline=True)
+            embed.add_field(name="Match ID",        value=str(match_id),                                                 inline=True)
+
+            if comment:
+                embed.add_field(name="Comment", value=comment[:1024], inline=False)
+
+            try:
+                await channel.send(embed=embed)
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                logger.error(f"Failed to send officer alert to guild {guild_id}: {e}")
 
 
 async def setup(bot):
