@@ -11,8 +11,8 @@ logger = logging.getLogger("thread_cog")
 BELL_TIMEOUT_MINS  = 15
 THREAD_ARCHIVE_HRS = 24
 
-EMOJI_GENESIS = "<:Genesis:1409872792211554365>"
-EMOJI_ENRICH  = "<:Enrich:1409872795600424960>"
+EMOJI_GENESIS = "<:Genesis:1519930122566635652>"
+EMOJI_ENRICH  = "<:Enrich:1519930167005413466>"
 EMOJI_RSE     = "<:ModTRSE:1256962175398842399>"
 EMOJI_LOW     = "<:modlow:1490529960899772516>"
 
@@ -95,7 +95,7 @@ class ThreadCog(commands.Cog):
             enr_best_ids = {p["discord_id"] for p in enr_players if p["enrich_level"] == max_enr}
 
         # Fetch active corp bonuses once for all threads
-        active_bonuses = self.bot.db.get_active_corp_bonuses()
+        #active_bonuses = self.bot.db.get_active_corp_bonuses()
 
         created_threads: list[dict] = []
 
@@ -127,7 +127,8 @@ class ThreadCog(commands.Cog):
                 proceed = t(lang, "match_proceed", level=drs_level)
 
                 # Build bonus embed if there are active bonuses
-                bonus_embed = self._build_bonus_embed(active_bonuses, lang)
+                bonus_embed = self._build_bonus_embed(lang)
+                #bonus_embed = self._build_bonus_embed(active_bonuses, lang)
 
                 embeds = [match_embed]
                 if bonus_embed:
@@ -206,7 +207,38 @@ class ThreadCog(commands.Cog):
     # Corp bonus embed — top 3 active bonuses, warns if < 1 hour
     # ------------------------------------------------------------------
 
-    def _build_bonus_embed(self, active_bonuses: list[dict], lang: str) -> discord.Embed | None:
+    # ------------------------------------------------------------------
+    # Corp bonus embed — from auto-fetch system
+    # ------------------------------------------------------------------
+
+    def _build_bonus_embed(self, lang: str) -> discord.Embed | None:
+        """Build bonus embed from auto-fetch system."""
+        # Get bonuses from the new tracked_corps table
+        corps = self.bot.bonus_service.get_active_bonuses()
+
+        if not corps:
+            return None
+
+        embed = discord.Embed(
+            title="🌟 Active Corporation Bonuses",
+            color=discord.Color.gold(),
+        )
+
+        lines = []
+        for corp in corps[:5]:  # Show top 5
+            lines.append(
+                f"**{corp['corp_name']}** — **{corp['bonus_pct']}%** bonus"
+            )
+
+        embed.description = "\n".join(lines)
+
+        if corps:
+            last_updated = corps[0]['last_fetched']
+            if last_updated:
+                embed.set_footer(text=f"Last updated: {last_updated[:16]}")
+
+        return embed
+    def _build_bonus_embed1(self, active_bonuses: list[dict], lang: str) -> discord.Embed | None:
         if not active_bonuses:
             return None
 

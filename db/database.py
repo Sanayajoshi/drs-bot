@@ -152,6 +152,20 @@ class DatabaseOperations:
             )""",
             "CREATE INDEX IF NOT EXISTS idx_cb_guild   ON corp_bonuses(guild_id)",
             "CREATE INDEX IF NOT EXISTS idx_cb_expires ON corp_bonuses(expires_at)",
+                        # Add this to the stmts list in _create_tables()
+            """CREATE TABLE IF NOT EXISTS tracked_corps (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                corp_id     TEXT NOT NULL UNIQUE,
+                corp_name   TEXT NOT NULL,
+                bonus_pct   INTEGER,
+                last_fetched TEXT NOT NULL DEFAULT (datetime('now')),
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                fetch_error TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_tc_corp_id ON tracked_corps(corp_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tc_bonus ON tracked_corps(bonus_pct DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_tc_active ON tracked_corps(is_active)",
         ]
         with self.connection:
             for stmt in stmts:
@@ -602,3 +616,65 @@ class DatabaseOperations:
             }
             for r in rows
         ]
+        # ------------------------------------------------------------------ tracked_corps (auto-fetch bonus system)
+
+    def add_tracked_corp(self, corp_id: str, corp_name: str, bonus_pct: int = None) -> bool:
+        """Add a corporation to track for auto-fetch bonuses."""
+        return self._execute(
+            """INSERT OR REPLACE INTO tracked_corps (corp_id, corp_name, bonus_pct, last_fetched, is_active)
+               VALUES (?, ?, ?, datetime('now'), 1)""",
+            (corp_id, corp_name, bonus_pct)
+        ) is not None
+
+    def remove_tracked_corp(self, corp_id: str) -> bool:
+        """Soft delete a tracked corporation."""
+        return self._execute(
+            "UPDATE tracked_corps SET is_active = 0 WHERE corp_id = ?",
+            (corp_id,)
+        ) is not None
+
+    def get_tracked_corps(self, active_only: bool = True) -> list[dict]:
+        """Get all tracked corporations."""
+        query = """SELECT corp_id, corp_name, bonus_pct, last_fetched, fetch_error
+                   FROM tracked_corps
+                   WHERE is_active = 1"""
+        if active_only:
+            query += " AND is_active = 1"
+        query += " ORDER BY bonus_pct DESC NULLS LAST"
+        return self._execute(query, fetch_all=True) or []
+
+    def get_active_corps_with_bonus(self) -> list[dict]:
+        """Get active corps with valid bonuses, sorted by bonus descending."""
+        return self._execute(
+            """SELECT corp_id, corp_name, bonus_pct, last_fetched
+               FROM tracked_corps
+               WHERE is_active = 1 AND bonus_pct IS NOT NULL
+               ORDER BY bonus_pct DESC""",
+            fetch_all=True
+        ) or []
+
+    def update_corp_bonus(self, corp_id: str, bonus_pct: int) -> bool:
+        """Update bonus percentage for a corporation."""
+        return self._execute(
+            """UPDATE tracked_corps
+               SET bonus_pct = ?, last_fetched = datetime('now'), fetch_error = NULL
+               WHERE corp_id = ?""",
+            (bonus_pct, corp_id)
+        ) is not None
+
+    def set_corp_fetch_error(self, corp_id: str, error: str) -> bool:
+        """Record an error when fetching bonus fails."""
+        return self._execute(
+            """UPDATE tracked_corps
+               SET fetch_error = ?, last_fetched = datetime('now')
+               WHERE corp_id = ?""",
+            (error, corp_id)
+        ) is not None
+
+    def get_all_active_corp_ids(self) -> list[str]:
+        """Get all active corporation IDs."""
+        rows = self._execute(
+            "SELECT corp_id FROM tracked_corps WHERE is_active = 1",
+            fetch_all=True
+        )
+        return [r["corp_id"] for r in rows] if rows else []

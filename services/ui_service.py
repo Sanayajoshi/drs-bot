@@ -36,8 +36,8 @@ def build_queue_embed(queue_data: list[dict], lang: str = "en") -> discord.Embed
         has_any = True
 
         # Header row
-        GEN = "<:Genesis:1409872792211554365>"
-        ENR = "<:Enrich:1409872795600424960>"
+        GEN = "<:Genesis:1519930122566635652>"
+        ENR = "<:Enrich:1519930167005413466>"
         RSE = "<:ModTRSE:1256962175398842399>"
         header = f"`{'Name':<20}` {GEN} {ENR} {RSE}"
         rows   = [header]
