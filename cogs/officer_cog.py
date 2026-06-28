@@ -338,4 +338,217 @@ class OfficerCog(commands.Cog):
         ) or []
 
         embed = discord.Embed(title="🏆 Most Active Pilots", color=discord.Color.gold())
-        if not
+        if not rows:
+            embed.description = "No match data yet."
+        else:
+            lines = []
+            medals = ["🥇","🥈","🥉"]
+            for i, r in enumerate(rows):
+                medal  = medals[i] if i < 3 else f"{i+1}."
+                levels = ", ".join(f"DRS{l}" for l in sorted(int(x) for x in r["levels"].split(",")))
+                lines.append(f"{medal} **{r['display_name']}** — {r['match_count']} runs ({levels})")
+            embed.description = "\n".join(lines)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # /officer queue
+    # ------------------------------------------------------------------
+
+    @drs.command(name="queue", description="Snapshot of the current queue across all levels")
+    async def queue(self, interaction: discord.Interaction):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        embed = discord.Embed(title="🔭 Current Queue Snapshot", color=discord.Color.blurple())
+        any_found = False
+        for level in config.DRS_LEVELS:
+            entries = self.bot.db.get_queue_for_level(level)
+            if not entries:
+                continue
+            any_found = True
+            lines = [f"**{e['display_name']}** — expires {e['expires_at'].strftime('%H:%M UTC') if e['expires_at'] else '?'}"
+                     for e in entries]
+            embed.add_field(name=f"DRS{level} ({len(entries)}/{config.MATCH_SIZE})",
+                            value="\n".join(lines), inline=False)
+        if not any_found:
+            embed.description = "Queue is empty."
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # /officer bonus set — select corp from dropdown, then fill modal
+    # ------------------------------------------------------------------
+
+    bonus_group = app_commands.Group(
+        name="bonus",
+        description="Manage corp bonuses",
+        parent=None,  # will be nested under /officer
+    )
+
+    @drs.command(name="bonus_set", description="Set or update a corp's active bonus")
+    async def bonus_set(self, interaction: discord.Interaction):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+
+        guilds = self.bot.guilds
+        if not guilds:
+            await interaction.response.send_message("❌ No corps (servers) found.", ephemeral=True)
+            return
+
+        view = CorpSelectView(list(guilds))
+        await interaction.response.send_message(
+            "Select the corp to set a bonus for:",
+            view=view,
+            ephemeral=True,
+        )
+
+    # ------------------------------------------------------------------
+    # /officer bonus_list — show all bonuses (active + expired)
+    # ------------------------------------------------------------------
+
+    @drs.command(name="bonus_list", description="List all corp bonuses (active and expired)")
+    async def bonus_list(self, interaction: discord.Interaction):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        bonuses = self.bot.db.get_all_corp_bonuses()
+        now     = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+        embed = discord.Embed(title="🌟 Corp Bonuses", color=discord.Color.gold())
+        if not bonuses:
+            embed.description = "No bonuses have been set yet."
+        else:
+            active_lines  = []
+            expired_lines = []
+            for b in bonuses:
+                expires_at = b["expires_at"]
+                if expires_at and expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                ts = int(expires_at.timestamp()) if expires_at else 0
+                line = f"**{b['corp_name']}** — **{b['bonus_pct']}%** · expires <t:{ts}:R>"
+                if expires_at and expires_at > now:
+                    active_lines.append("🟢 " + line)
+                else:
+                    expired_lines.append("🔴 " + line)
+
+            if active_lines:
+                embed.add_field(
+                    name="Active",
+                    value="\n".join(active_lines),
+                    inline=False,
+                )
+            if expired_lines:
+                embed.add_field(
+                    name="Expired",
+                    value="\n".join(expired_lines),
+                    inline=False,
+                )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # Live Mod Chat Relay (With Automatic Translation)
+    # ------------------------------------------------------------------
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Relays and translates messages typed in designated officer channels to other servers."""
+        # Avoid processing bot messages or direct messages
+        if message.author.bot or not message.guild:
+            return
+
+        # Fetch the server configuration for the sender's guild
+        source_guild_id = message.guild.id
+        source_server = self.bot.db.get_server(source_guild_id)
+        if not source_server or not source_server.get("officer_channel_id"):
+            return
+
+        # Ensure the message was typed in the designated officer channel
+        if message.channel.id != source_server["officer_channel_id"]:
+            return
+
+        # Ensure the message has text content to relay
+        content = message.content.strip()
+        if not content:
+            return
+
+        source_lang = source_server.get("language", "en")
+        author_label = f"👮 {message.author.display_name} [{message.guild.name}]"
+
+        # Relay to all other configured servers
+        for srv in self.bot.db.get_all_servers():
+            target_guild_id = srv["guild_id"]
+            if target_guild_id == source_guild_id:
+                continue
+
+            # Fetch target config to verify they have an officer channel
+            target_server = self.bot.db.get_server(target_guild_id)
+            if not target_server or not target_server.get("officer_channel_id"):
+                continue
+
+            target_guild = self.bot.get_guild(target_guild_id)
+            target_channel = target_guild and target_guild.get_channel(target_server["officer_channel_id"])
+            if not target_channel:
+                continue
+
+            target_lang = target_server.get("language", "en")
+            
+            # Translate message if languages differ
+            display_content = content
+            footer_text = None
+            
+            if source_lang != target_lang:
+                translated = await self._translate_mod_message(content, source_lang, target_lang)
+                if translated and translated != content:
+                    display_content = translated
+                    # Show preview of original text in footer
+                    truncated_original = content[:150] + ("..." if len(content) > 150 else "")
+                    footer_text = f"Original: {truncated_original}"
+
+            # Build a simple, clean message embed
+            embed = discord.Embed(
+                description=display_content,
+                color=discord.Color.blue()
+            )
+            embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+            
+            if footer_text:
+                embed.set_footer(text=footer_text)
+
+            try:
+                await target_channel.send(embed=embed)
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                logger.error(f"Failed to relay and translate mod message to guild {target_guild_id}: {e}")
+
+    async def _translate_mod_message(self, text: str, source_lang: str, target_lang: str) -> str:
+        """Helper to call translation API (MyMemory) asynchronously."""
+        url = "https://api.mymemory.translated.net/get"
+        lang_codes = {"en": "en-US", "ja": "ja-JP"}
+        
+        src = lang_codes.get(source_lang, source_lang)
+        tgt = lang_codes.get(target_lang, target_lang)
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params={"q": text, "langpair": f"{src}|{tgt}"}) as resp:
+                    if resp.status != 200:
+                        return text
+                    data = await resp.json()
+                    if data.get("responseStatus") != 200:
+                        return text
+                    return data["responseData"]["translatedText"]
+        except Exception as e:
+            logger.error(f"Mod translation failed: {e}")
+            return text
+
+
+async def setup(bot):
+    await bot.add_cog(OfficerCog(bot))
