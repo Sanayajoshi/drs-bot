@@ -198,8 +198,28 @@ class QueueCog(commands.Cog):
             except Exception as e:
                 logger.error(f"notify_extend failed for guild {guild_id}: {e}")
 
-    async def _notify_match_formed(self, drs_level: int):
-        """Broadcast match-formed notice to every server's notification channel. No tags."""
+    # ------------------------------------------------------------------
+    # Match Formation Listener (Prominent, Cross-Server Embed)
+    # ------------------------------------------------------------------
+
+    @commands.Cog.listener()
+    async def on_drs_match_formed(self, match_id: int, drs_level: int, participants: list[dict]):
+        """
+        Listens for match formation, compiles a player list indicating home corporations (servers),
+        and broadcasts a compact, formatted embed announcement across all registered servers.
+        """
+        # Fetch detailed participant records from the database
+        full_participants = self.bot.db.get_match_participants(match_id)
+        
+        # Compile player list with guild name mapping
+        player_lines = []
+        for p in full_participants:
+            origin_guild = self.bot.get_guild(p["queue_guild_id"])
+            corp_name = origin_guild.name if origin_guild else "Unknown"
+            player_lines.append(f"• **{p['display_name']}** (*{corp_name}*)")
+            
+        roster_str = "\n".join(player_lines)
+
         for srv in self.bot.db.get_all_servers():
             guild_id = srv["guild_id"]
             full_srv = self.bot.db.get_server(guild_id)
@@ -209,14 +229,24 @@ class QueueCog(commands.Cog):
             channel = guild and guild.get_channel(full_srv["notification_channel_id"])
             if not channel:
                 continue
-            lang = full_srv.get("language", "en")
-            line = t(lang, "notify_match_formed", level=drs_level, size=config.MATCH_SIZE)
+
+            # Local server level role mention
+            role_id = full_srv.get(f"role_drs{drs_level}")
+            role_mention = f"<@&{role_id}>" if role_id else ""
+
+            # Compact, clean styling
+            embed = discord.Embed(
+                title=f"⚔️ DRS {drs_level} Formed! (Match #{match_id})",
+                description=f"**Roster:**\n{roster_str}",
+                color=discord.Color.red()
+            )
+
             try:
-                await channel.send(line)
+                await channel.send(content=role_mention, embed=embed)
             except discord.Forbidden:
                 pass
             except Exception as e:
-                logger.error(f"notify_match_formed failed for guild {guild_id}: {e}")
+                logger.error(f"Failed to send match formed notice to guild {guild_id}: {e}")
 
     # ------------------------------------------------------------------
     # Expiry warning — tag the player, player-only extend button
@@ -345,7 +375,6 @@ class QueueCog(commands.Cog):
 
         if result == "match_formed":
             await interaction.followup.send(t(lang, "match_formed", level=level), ephemeral=True)
-            await self._notify_match_formed(level)
         else:
             levels    = self.bot.db.get_user_queue_levels(discord_id)
             level_str = ", ".join(f"DRS{l}" for l in sorted(levels))
@@ -447,7 +476,6 @@ class QueueCog(commands.Cog):
             result = await self.queue_service.quick_start_match(drs_level, queue[:2])
             if result == "match_formed":
                 await interaction.followup.send(t(lang, "qs_confirmed", level=drs_level), ephemeral=True)
-                await self._notify_match_formed(drs_level)
             else:
                 await interaction.followup.send("Something went wrong forming the match.", ephemeral=True)
         else:
