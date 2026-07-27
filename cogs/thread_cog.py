@@ -15,7 +15,8 @@ EMOJI_GENESIS = "<:Genesis:1519930122566635652>"
 EMOJI_ENRICH  = "<:Enrich:1519930167005413466>"
 EMOJI_RSE     = "<:ModTRSE:1256962175398842399>"
 EMOJI_LOW     = "<:modlow:1490529960899772516>"
-
+EMOJI_LOW_GEN = "<:lowgenesis:1521752341865299978>"
+EMOJI_LOW_ENR = "<:lowenrich:1521713961601339402>"
 
 def _format_timedelta(expires_at: datetime) -> str:
     """Return a human-friendly remaining time string, e.g. '2h 15m'."""
@@ -186,8 +187,8 @@ class ThreadCog(commands.Cog):
             enr_str = str(enr_lvl) if enr_lvl is not None else "?"
             rse_str = str(rse_lvl) if rse_lvl is not None else "?"
 
-            gen_icon = EMOJI_GENESIS if pid in gen_best_ids else EMOJI_LOW
-            enr_icon = EMOJI_ENRICH  if pid in enr_best_ids else EMOJI_LOW
+            gen_icon = EMOJI_GENESIS if pid in gen_best_ids else EMOJI_LOW_GEN # EMOJI_LOW
+            enr_icon = EMOJI_ENRICH  if pid in enr_best_ids else EMOJI_LOW_ENR #EMOJI_LOW
 
             row = f"**`{corp:<10}`**` {name:<10}` {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
             rows.append(row)

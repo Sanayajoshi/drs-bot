@@ -233,6 +233,7 @@ class QueueCog(commands.Cog):
             # Local server level role mention
             role_id = full_srv.get(f"role_drs{drs_level}")
             role_mention = f"<@&{role_id}>" if role_id else ""
+            role_mention = ""
 
             # Compact, clean styling
             embed = discord.Embed(
