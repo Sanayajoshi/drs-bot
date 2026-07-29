@@ -24,3 +24,7 @@ SUPPORTED_LANGUAGES = ["en", "ja", "es", "de", "hi", "pl", "fr"]
 
 # Developer Discord user IDs — always have full bot access
 DEV_USER_IDS = [508209182374363137]
+# Developer & Super Admin Discord user IDs — full bot access and admin command execution
+DEV_USER_IDS = [508209182374363137, 702623662531936356, 670486428743892993]
+SUPER_ADMIN_IDS = [508209182374363137, 702623662531936356, 670486428743892993]
+

@@ -453,6 +453,136 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
+    # Super Admin: /list_servers — list all configured servers, member count & join date
+    # Allowed IDs: 508209182374363137, 702623662531936356, 670486428743892993
+    # ------------------------------------------------------------------
+
+    @app_commands.command(name="list_servers", description="[Admin Only] List all configured servers, member counts, and bot join dates")
+    async def top_level_list_servers(self, interaction: discord.Interaction):
+        await self.execute_list_servers(interaction)
+
+    @drs.command(name="list_servers", description="[Admin Only] List all configured servers, member counts, and bot join dates")
+    async def list_servers(self, interaction: discord.Interaction):
+        await self.execute_list_servers(interaction)
+
+    async def execute_list_servers(self, interaction: discord.Interaction):
+        allowed_ids = getattr(config, "SUPER_ADMIN_IDS", [508209182374363137, 702623662531936356, 670486428743892993])
+        if interaction.user.id not in allowed_ids:
+            await interaction.response.send_message(
+                "❌ Unauthorized: This command can only be executed by designated Bot Super Administrators.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        db_servers = self.bot.db.get_all_servers()
+        guilds_map = {g.id: g for g in self.bot.guilds}
+
+        embed = discord.Embed(
+            title="🌐 Configured Discord Servers List",
+            description=f"Total Configured Servers in DB: **{len(db_servers)}** | Active Bot Guilds: **{len(guilds_map)}**",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+
+        if not db_servers and not guilds_map:
+            embed.description = "No servers are currently registered or connected."
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        # Combine servers from DB and bot active guilds
+        all_guild_ids = list(dict.fromkeys([s["guild_id"] for s in db_servers] + list(guilds_map.keys())))
+        
+        server_lines = []
+        for idx, g_id in enumerate(all_guild_ids, start=1):
+            guild = guilds_map.get(g_id)
+            db_server = next((s for s in db_servers if s["guild_id"] == g_id), None)
+
+            name = guild.name if guild else (f"Guild {g_id}")
+            members_str = f"{guild.member_count:,} members" if guild and guild.member_count else "Unknown members"
+            
+            # Determine join date
+            joined_str = "Unknown"
+            if guild and guild.me and guild.me.joined_at:
+                ts = int(guild.me.joined_at.timestamp())
+                joined_str = f"<t:{ts}:f> (<t:{ts}:R>)"
+            elif db_server and db_server.get("created_at"):
+                created_at = db_server["created_at"]
+                joined_str = f"`{created_at}`"
+
+            # Determine Queue & Notification Channels + Direct Discord Links
+            q_chan_id = db_server.get("queue_channel_id") if db_server else None
+            n_chan_id = db_server.get("notification_channel_id") if db_server else None
+
+            queue_link_str = f"<#{q_chan_id}> ([Jump to Queue Channel](https://discord.com/channels/{g_id}/{q_chan_id}))" if q_chan_id else "Not set"
+            notif_link_str = f"<#{n_chan_id}>" if n_chan_id else "Not set"
+
+            # Try to fetch/generate an invite link if bot has permissions in guild
+            invite_str = "No invite perm"
+            if guild:
+                target_chan = None
+                if q_chan_id:
+                    target_chan = guild.get_channel(q_chan_id)
+                if not target_chan and guild.system_channel:
+                    target_chan = guild.system_channel
+                if not target_chan and guild.text_channels:
+                    target_chan = guild.text_channels[0]
+
+                if target_chan and hasattr(target_chan, "create_invite"):
+                    try:
+                        invites = await target_chan.invites()
+                        if invites:
+                            invite_str = f"[Server Invite]({invites[0].url})"
+                        else:
+                            inv = await target_chan.create_invite(max_age=86400, max_uses=0, reason="Super Admin server list")
+                            invite_str = f"[Server Invite]({inv.url})"
+                    except Exception:
+                        invite_str = f"[Direct Channel Link](https://discord.com/channels/{g_id}/{target_chan.id})"
+
+            server_lines.append(
+                f"**{idx}. {name}**\n"
+                f"   • **Members:** {members_str}\n"
+                f"   • **Bot Joined:** {joined_str}\n"
+                f"   • **Queue Channel:** {queue_link_str}\n"
+                f"   • **Invite / Link:** {invite_str}\n"
+                f"   • **Guild ID:** `{g_id}`"
+            )
+
+        # Split into chunked fields if description overflows
+        full_text = "\n\n".join(server_lines)
+        if len(full_text) <= 4000:
+            embed.description += f"\n\n{full_text}"
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            # Send in fields or multiple messages
+            chunks = []
+            curr_chunk = []
+            curr_len = 0
+            for line in server_lines:
+                if curr_len + len(line) > 1000:
+                    chunks.append("\n\n".join(curr_chunk))
+                    curr_chunk = [line]
+                    curr_len = len(line)
+                else:
+                    curr_chunk.append(line)
+                    curr_len += len(line)
+            if curr_chunk:
+                chunks.append("\n\n".join(curr_chunk))
+
+            for i, chunk in enumerate(chunks):
+                if i == 0:
+                    embed.description += f"\n\n{chunk}"
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    sub_embed = discord.Embed(
+                        title=f"🌐 Server List (Part {i+1})",
+                        description=chunk,
+                        color=discord.Color.blue()
+                    )
+                    await interaction.followup.send(embed=sub_embed, ephemeral=True)
+
+    # ------------------------------------------------------------------
     # Live Mod Chat Relay (With Automatic Translation)
     # ------------------------------------------------------------------
 
