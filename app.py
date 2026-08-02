@@ -44,6 +44,7 @@ class DRSBot(commands.Bot):
             "cogs.feedback_cog",
             "cogs.officer_cog",
             "cogs.bonus_cog",  # New bonus cog
+            "cogs.engagement_cog",  # Engagement & Facts cog
         ]
         for cog in cogs:
             try:
@@ -102,3 +103,4 @@ if __name__ == "__main__":
         raise RuntimeError("DISCORD_BOT_TOKEN environment variable not set.")
     bot = DRSBot()
     bot.run(config.BOT_TOKEN)
+
