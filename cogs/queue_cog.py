@@ -310,6 +310,8 @@ class QueueCog(commands.Cog):
             await self._handle_extend(interaction)
         elif custom_id == "drs_quickstart":
             await self._handle_quickstart(interaction)
+        elif custom_id == "drs_need_assist":
+            await self._handle_need_assist(interaction)
         elif custom_id in MOD_MAP:
             await self._handle_mod_button(interaction, custom_id)
 
@@ -531,6 +533,27 @@ class QueueCog(commands.Cog):
         await interaction.followup.send(
             t(lang, "mod_set", mod=mod_label, level=selected_level), ephemeral=True
         )
+
+    # ------------------------------------------------------------------
+    # Need Assist toggle
+    # ------------------------------------------------------------------
+
+    async def _handle_need_assist(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        discord_id   = interaction.user.id
+        display_name = interaction.user.display_name
+        guild_id     = interaction.guild_id
+
+        self.bot.db.upsert_user(discord_id, display_name)
+        if guild_id:
+            self.bot.db.upsert_user_server(discord_id, guild_id, display_name)
+
+        new_status = self.bot.db.toggle_need_assist(discord_id)
+        status_text = "ENABLED 🆘" if new_status else "DISABLED ❌"
+        await interaction.followup.send(
+            f"Need Assist status is now **{status_text}**.", ephemeral=True
+        )
+        await self._push_queue_update()
 
     # ------------------------------------------------------------------
     # Expiry loop — sweeps + sends 5-min warnings

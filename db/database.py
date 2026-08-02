@@ -74,6 +74,7 @@ class DatabaseOperations:
                 genesis_level INTEGER CHECK (genesis_level BETWEEN 6 AND 15),
                 enrich_level  INTEGER CHECK (enrich_level  BETWEEN 6 AND 15),
                 modt_level    INTEGER CHECK (modt_level    BETWEEN 6 AND 15),
+                need_assist   INTEGER NOT NULL DEFAULT 0,
                 created_at    TEXT NOT NULL DEFAULT (datetime('now'))
             )""",
             """CREATE TABLE IF NOT EXISTS user_servers (
@@ -209,6 +210,7 @@ class DatabaseOperations:
             )""",
             "CREATE INDEX IF NOT EXISTS idx_cb_guild   ON corp_bonuses(guild_id)",
             "CREATE INDEX IF NOT EXISTS idx_cb_expires ON corp_bonuses(expires_at)",
+            "ALTER TABLE users ADD COLUMN need_assist INTEGER NOT NULL DEFAULT 0",
         ]
         for stmt in migrations:
             try:
@@ -319,10 +321,32 @@ class DatabaseOperations:
 
     def get_user_mod_levels(self, discord_id: int) -> dict:
         row = self._execute(
-            "SELECT genesis_level, enrich_level, modt_level FROM users WHERE discord_id = ?",
+            "SELECT genesis_level, enrich_level, modt_level, need_assist FROM users WHERE discord_id = ?",
             (discord_id,), fetch_one=True
         )
-        return row if row else {"genesis_level": None, "enrich_level": None, "modt_level": None}
+        return row if row else {"genesis_level": None, "enrich_level": None, "modt_level": None, "need_assist": 0}
+
+    def get_user(self, discord_id: int) -> dict | None:
+        row = self._execute(
+            "SELECT discord_id, display_name, genesis_level, enrich_level, modt_level, need_assist FROM users WHERE discord_id = ?",
+            (discord_id,), fetch_one=True
+        )
+        if row:
+            row["need_assist"] = bool(row.get("need_assist", 0))
+        return row
+
+    def set_need_assist(self, discord_id: int, need_assist: bool) -> bool:
+        return self._execute(
+            "UPDATE users SET need_assist = ? WHERE discord_id = ?",
+            (1 if need_assist else 0, discord_id)
+        ) is not None
+
+    def toggle_need_assist(self, discord_id: int) -> bool:
+        user = self.get_user(discord_id)
+        current = user.get("need_assist", False) if user else False
+        new_val = not current
+        self.set_need_assist(discord_id, new_val)
+        return new_val
 
     def join_queue(self, discord_id: int, drs_level: int, expires_at: datetime, guild_id: int = None) -> bool:
         expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -358,7 +382,7 @@ class DatabaseOperations:
 
     def get_queue_for_level(self, drs_level: int) -> list[dict]:
         rows = self._execute(
-            """SELECT qe.discord_id, u.display_name, qe.expires_at, qe.joined_at, qe.quick_start
+            """SELECT qe.discord_id, u.display_name, qe.expires_at, qe.joined_at, qe.quick_start, u.need_assist
                FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
                WHERE qe.drs_level = ? AND qe.expires_at > datetime('now')
                ORDER BY qe.joined_at ASC""",
@@ -368,12 +392,13 @@ class DatabaseOperations:
             return []
         return [{"discord_id": r["discord_id"], "display_name": r["display_name"],
                  "expires_at": _parse_dt(r["expires_at"]), "joined_at": _parse_dt(r["joined_at"]),
-                 "quick_start": bool(r["quick_start"])} for r in rows]
+                 "quick_start": bool(r["quick_start"]),
+                 "need_assist": bool(r.get("need_assist", 0))} for r in rows]
 
     def get_full_queue(self) -> list[dict]:
         rows = self._execute(
             """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.expires_at, qe.quick_start,
-                      u.genesis_level, u.enrich_level, u.modt_level
+                      u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
                FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
                WHERE qe.expires_at > datetime('now')
                ORDER BY qe.drs_level, qe.joined_at ASC""",
@@ -385,7 +410,8 @@ class DatabaseOperations:
                  "drs_level": r["drs_level"], "expires_at": _parse_dt(r["expires_at"]),
                  "quick_start": bool(r["quick_start"]),
                  "genesis_level": r["genesis_level"], "enrich_level": r["enrich_level"],
-                 "modt_level": r["modt_level"]} for r in rows]
+                 "modt_level": r["modt_level"],
+                 "need_assist": bool(r.get("need_assist", 0))} for r in rows]
 
     def remove_expired_entries(self) -> list[int]:
         if not self.connection:
@@ -678,3 +704,4 @@ class DatabaseOperations:
             fetch_all=True
         )
         return [r["corp_id"] for r in rows] if rows else []
+

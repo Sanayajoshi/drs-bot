@@ -1,3 +1,4 @@
+import random
 from datetime import datetime, timezone
 
 import discord
@@ -8,6 +9,13 @@ EMOJI_ENRICH  = discord.PartialEmoji(name="Enrich",  id=1409872795600424960)
 EMOJI_MODT    = discord.PartialEmoji(name="ModTRSE", id=1256962175398842399)
 EMOJI_11      = discord.PartialEmoji(name="11",      id=1378449282688090184)
 EMOJI_12      = discord.PartialEmoji(name="12",      id=1378449310831607828)
+
+HELP_ICONS = [
+    "<:penhelp:1531861262735245353>",
+    "<:dinohelp:1531861260679774238>",
+    "<:cutehelp:1531861255944536125>",
+    "<:cathelp:1531861255214731264>",
+]
 
 # Unicode emoji for levels 7-10
 LEVEL_EMOJI = {
@@ -45,11 +53,12 @@ def build_queue_embed(queue_data: list[dict], lang: str = "en") -> discord.Embed
         for e in entries:
             remaining = _format_remaining(e["expires_at"])
             qs_marker = " ▶️" if e.get("quick_start") else ""
+            help_marker = f" {random.choice(HELP_ICONS)}" if e.get("need_assist") else ""
             name      = e["display_name"][:15]
             gen_lvl   = e.get("genesis_level", "?") if e.get("genesis_level") is not None else "?"
             enr_lvl   = e.get("enrich_level",  "?") if e.get("enrich_level")  is not None else "?"
             rse_lvl   = e.get("modt_level",    "?") if e.get("modt_level")    is not None else "?"
-            rows.append(f"`{name:<15}`{qs_marker:<2} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}`  — {remaining}")
+            rows.append(f"`{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}`  — {remaining}")
 
         embed.add_field(
             name=f"DRS{level}  ({len(entries)}/{config.MATCH_SIZE})",
@@ -70,6 +79,7 @@ def build_queue_view() -> discord.ui.View:
     Row 0: 7️⃣  8️⃣  9️⃣  ▶️ QuickStart
     Row 1: 🔟  11  12  ⏳ Extend
     Row 2: GEN  ENR  RSE  ❌ Leave
+    Row 3: 🆘 Need Assist
     """
     view = discord.ui.View(timeout=None)
 
@@ -150,6 +160,15 @@ def build_queue_view() -> discord.ui.View:
         row=2
     ))
 
+    # Row 3: Need Assist (SOS)
+    view.add_item(discord.ui.Button(
+        label="",
+        emoji="🆘",
+        style=discord.ButtonStyle.secondary,
+        custom_id="drs_need_assist",
+        row=3
+    ))
+
     return view
 
 
@@ -162,3 +181,4 @@ def _format_remaining(expires_at: datetime) -> str:
         return "0m"
     mins = max(1, round(delta.total_seconds() / 60))
     return f"{mins}m"
+
