@@ -233,7 +233,6 @@ class QueueCog(commands.Cog):
             # Local server level role mention
             role_id = full_srv.get(f"role_drs{drs_level}")
             role_mention = f"<@&{role_id}>" if role_id else ""
-            role_mention = ""
 
             # Compact, clean styling
             embed = discord.Embed(
@@ -253,9 +252,12 @@ class QueueCog(commands.Cog):
     # Expiry warning — tag the player, player-only extend button
     # ------------------------------------------------------------------
 
-    async def _warn_expiring(self, discord_id: int, display_name: str, drs_level: int):
-        """Send a 5-minute expiry warning to the player in every server they belong to."""
-        guild_ids = self.bot.db.get_user_guilds(discord_id)
+    async def _warn_expiring(self, discord_id: int, display_name: str, drs_level: int, queue_guild_id: int | None = None):
+        """Send a 5-minute expiry warning to the player in the server they queued from or belong to."""
+        if queue_guild_id:
+            guild_ids = [queue_guild_id]
+        else:
+            guild_ids = self.bot.db.get_user_guilds(discord_id)
         sent = False
         for guild_id in guild_ids:
             server = self.bot.db.get_server(guild_id)
@@ -263,6 +265,11 @@ class QueueCog(commands.Cog):
                 continue
             guild   = self.bot.get_guild(guild_id)
             channel = guild and guild.get_channel(server["notification_channel_id"])
+            if not channel and server.get("notification_channel_id"):
+                try:
+                    channel = await self.bot.fetch_channel(server["notification_channel_id"])
+                except Exception:
+                    channel = None
             if not channel:
                 continue
             lang = server.get("language", "en")
@@ -271,7 +278,7 @@ class QueueCog(commands.Cog):
             try:
                 await channel.send(msg_text, view=view)
                 sent = True
-                break  # warn once — in first valid server found
+                break  # warn once — in target server found
             except discord.Forbidden:
                 pass
             except Exception as e:
@@ -331,7 +338,15 @@ class QueueCog(commands.Cog):
             await interaction.followup.send(t(lang, "expiry_not_yours"), ephemeral=True)
             return
 
-        self.bot.db.extend_queue(owner_id, config.EXTEND_MINS)
+        if not self.bot.db.is_user_queued_for_level(owner_id, drs_level):
+            await interaction.followup.send(t(lang, "not_in_queue"), ephemeral=True)
+            return
+
+        success = self.bot.db.extend_queue(owner_id, config.EXTEND_MINS)
+        if not success:
+            await interaction.followup.send(t(lang, "not_in_queue"), ephemeral=True)
+            return
+
         # Clear the warning so they can be warned again next time
         self._warned.discard((owner_id, drs_level))
 
@@ -489,14 +504,26 @@ class QueueCog(commands.Cog):
         await self._push_queue_update()
 
     async def _notify_quickstart(self, requester_id, requester_name, drs_level, queue):
-        other_ids = [e["discord_id"] for e in queue if e["discord_id"] != requester_id]
-        for target_id in other_ids:
-            for guild_id in self.bot.db.get_user_guilds(target_id):
+        other_entries = [e for e in queue if e["discord_id"] != requester_id]
+        for entry in other_entries:
+            target_id   = entry["discord_id"]
+            queue_guild = entry.get("queue_guild_id")
+            if queue_guild:
+                target_guilds = [queue_guild]
+            else:
+                target_guilds = self.bot.db.get_user_guilds(target_id)
+
+            for guild_id in target_guilds:
                 server = self.bot.db.get_server(guild_id)
                 if not server or not server.get("notification_channel_id"):
                     continue
                 guild   = self.bot.get_guild(guild_id)
                 channel = guild and guild.get_channel(server["notification_channel_id"])
+                if not channel and server.get("notification_channel_id"):
+                    try:
+                        channel = await self.bot.fetch_channel(server["notification_channel_id"])
+                    except Exception:
+                        channel = None
                 if not channel:
                     continue
                 lang = server.get("language", "en")
@@ -574,7 +601,7 @@ class QueueCog(commands.Cog):
                 expires_at = entry["expires_at"]
                 if expires_at and expires_at <= warn_threshold:
                     warned = await self._warn_expiring(
-                        entry["discord_id"], entry["display_name"], entry["drs_level"]
+                        entry["discord_id"], entry["display_name"], entry["drs_level"], entry.get("queue_guild_id")
                     )
                     if warned:
                         self._warned.add(key)

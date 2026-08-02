@@ -32,8 +32,9 @@ LORE_MEMES = [
 
 
 class FactsService:
-    def __init__(self, db):
+    def __init__(self, db, bot=None):
         self.db = db
+        self.bot = bot
 
     def get_random_fact_embed(self) -> discord.Embed:
         generators = [
@@ -82,7 +83,13 @@ class FactsService:
             medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
             for idx, c in enumerate(corps):
                 m = medals[idx] if idx < len(medals) else "▫️"
-                lines.append(f"{m} **Guild ID `{c['queue_guild_id']}`** — `{c['total_runs']}` operations")
+                g_id = c['queue_guild_id']
+                corp_name = f"Guild {g_id}"
+                if self.bot:
+                    guild = self.bot.get_guild(g_id)
+                    if guild:
+                        corp_name = guild.name
+                lines.append(f"{m} **{corp_name}** — `{c['total_runs']}` operations")
             embed.add_field(name="Top Squadrons", value="\n".join(lines), inline=False)
 
         embed.set_footer(text="DRS Engagement Network • Guild Ranking")

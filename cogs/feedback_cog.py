@@ -34,8 +34,8 @@ ISSUE_LABELS = {
     "other":       "Other ❓",
 }
 
-# No Show is logged only — no mod alert
-ALERT_ISSUE_TYPES = {"behavior", "performance", "other"}
+# All issue types generate mod alerts so officers are notified immediately
+ALERT_ISSUE_TYPES = {"no_show", "behavior", "performance", "other"}
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +347,11 @@ class FeedbackCog(commands.Cog):
 
             guild = self.bot.get_guild(guild_id)
             channel = guild and guild.get_channel(server["officer_channel_id"])
+            if not channel and server.get("officer_channel_id"):
+                try:
+                    channel = await self.bot.fetch_channel(server["officer_channel_id"])
+                except Exception:
+                    channel = None
             if not channel:
                 continue
 

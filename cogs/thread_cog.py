@@ -18,6 +18,7 @@ EMOJI_LOW     = "<:modlow:1490529960899772516>"
 EMOJI_LOW_GEN = "<:lowgenesis:1521752341865299978>"
 EMOJI_LOW_ENR = "<:lowenrich:1521713961601339402>"
 
+
 def _format_timedelta(expires_at: datetime) -> str:
     """Return a human-friendly remaining time string, e.g. '2h 15m'."""
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
@@ -54,19 +55,15 @@ class ThreadCog(commands.Cog):
         # queue_guild_id is now stored on match_participants — reliable after queue deletion
         queue_guild_map = self.bot.db.get_participant_queue_guilds(participant_ids)
 
-        # Group participants by the guild they queued from
+        # Group participants by the guild they queued from (with per-player fallback)
         guild_to_pids: dict[int, list[int]] = {}
         for pid in participant_ids:
             g = queue_guild_map.get(pid)
+            if not g:
+                guilds = self.bot.db.get_user_guilds(pid)
+                g = guilds[0] if guilds else None
             if g:
                 guild_to_pids.setdefault(g, []).append(pid)
-
-        # Fallback: no recorded queue guild — use first known guild
-        if not guild_to_pids:
-            for pid in participant_ids:
-                guilds = self.bot.db.get_user_guilds(pid)
-                if guilds:
-                    guild_to_pids.setdefault(guilds[0], []).append(pid)
 
         # discord_id → corp name (the guild name they queued from)
         id_to_corp: dict[int, str] = {}
@@ -187,8 +184,8 @@ class ThreadCog(commands.Cog):
             enr_str = str(enr_lvl) if enr_lvl is not None else "?"
             rse_str = str(rse_lvl) if rse_lvl is not None else "?"
 
-            gen_icon = EMOJI_GENESIS if pid in gen_best_ids else EMOJI_LOW_GEN # EMOJI_LOW
-            enr_icon = EMOJI_ENRICH  if pid in enr_best_ids else EMOJI_LOW_ENR #EMOJI_LOW
+            gen_icon = EMOJI_GENESIS if pid in gen_best_ids else EMOJI_LOW_GEN
+            enr_icon = EMOJI_ENRICH  if pid in enr_best_ids else EMOJI_LOW_ENR
 
             row = f"**`{corp:<10}`**` {name:<10}` {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
             rows.append(row)
@@ -405,3 +402,4 @@ class ThreadCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ThreadCog(bot))
+

@@ -249,6 +249,7 @@ class OfficerCog(commands.Cog):
 
         participants = self.bot.db.get_match_participants(match_id)
         feedback     = self.bot.db.get_match_feedback(match_id)
+        reports      = self.bot.db.get_feedback_reports_for_match(match_id)
         threads      = self.bot.db.get_match_threads(match_id)
 
         embed = discord.Embed(
@@ -268,7 +269,15 @@ class OfficerCog(commands.Cog):
 
         if feedback:
             fb_lines = [f"{'✅' if f['was_positive'] else '❌'} {f['display_name']}" for f in feedback]
-            embed.add_field(name="Feedback", value="\n".join(fb_lines), inline=False)
+            embed.add_field(name="Ratings", value="\n".join(fb_lines), inline=False)
+
+        if reports:
+            rpt_lines = []
+            for r in reports:
+                issue = r['issue_type'].replace('_', ' ').title()
+                cmt = f" — *\"{r['comment']}\"*" if r.get('comment') else ""
+                rpt_lines.append(f"⚠️ **{issue}**: {r['reporter_name']} reported **{r['reported_name']}**{cmt}")
+            embed.add_field(name="Reports & Issues", value="\n".join(rpt_lines), inline=False)
 
         if threads:
             thread_refs = [f"<#{t['thread_id']}>" for t in threads]

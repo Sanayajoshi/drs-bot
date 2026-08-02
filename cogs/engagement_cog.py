@@ -12,7 +12,7 @@ logger = logging.getLogger("engagement_cog")
 class EngagementCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.facts_service = FactsService(bot.db)
+        self.facts_service = FactsService(bot.db, bot=bot)
         self.auto_facts_loop.start()
 
     def cog_unload(self):
@@ -45,13 +45,18 @@ class EngagementCog(commands.Cog):
             return
 
         embed = self.facts_service.get_random_fact_embed()
-        await interaction.channel.send(
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions.none()
-        )
-        await interaction.response.send_message(
-            "✅ Random engagement fact posted immediately to this channel!", ephemeral=True
-        )
+        try:
+            await interaction.channel.send(
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+            await interaction.response.send_message(
+                "✅ Random engagement fact posted immediately to this channel!", ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Missing permissions to send messages/embeds in this channel.", ephemeral=True
+            )
 
     @app_commands.command(name="setfactfrequency", description="Set engagement fact posting frequency in hours")
     @app_commands.describe(hours="Frequency in hours (default: 4)")
@@ -116,6 +121,18 @@ class EngagementCog(commands.Cog):
 
                 channel = guild.get_channel(notif_channel_id)
                 if not channel:
+                    try:
+                        channel = await self.bot.fetch_channel(notif_channel_id)
+                    except Exception:
+                        channel = None
+
+                if not channel:
+                    continue
+
+                # Check channel permissions before attempting send
+                perms = channel.permissions_for(guild.me)
+                if not perms.send_messages or not perms.embed_links:
+                    logger.warning(f"Bot lacks send_messages or embed_links permission in server '{guild.name}' ({guild_id}) channel #{getattr(channel, 'name', notif_channel_id)}")
                     continue
 
                 freq_hours = srv.get("fact_frequency_hours") or 4
@@ -140,9 +157,11 @@ class EngagementCog(commands.Cog):
                             allowed_mentions=discord.AllowedMentions.none()
                         )
                         self.bot.db.update_last_fact_sent(guild_id)
-                        logger.info(f"Posted automated fact to guild {guild_id}")
+                        logger.info(f"Posted automated fact to server '{guild.name}' ({guild_id})")
+                    except discord.Forbidden:
+                        logger.warning(f"Permission denied (403 Forbidden) posting automated fact to server '{guild.name}' ({guild_id}) channel #{getattr(channel, 'name', notif_channel_id)}")
                     except Exception as e:
-                        logger.error(f"Failed to post automated fact to guild {guild_id}: {e}")
+                        logger.error(f"Failed to post automated fact to server '{guild.name}' ({guild_id}): {e}")
         except Exception as e:
             logger.error(f"Error in auto_facts_loop: {e}", exc_info=True)
 

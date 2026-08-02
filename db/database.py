@@ -211,6 +211,8 @@ class DatabaseOperations:
             "CREATE INDEX IF NOT EXISTS idx_cb_guild   ON corp_bonuses(guild_id)",
             "CREATE INDEX IF NOT EXISTS idx_cb_expires ON corp_bonuses(expires_at)",
             "ALTER TABLE users ADD COLUMN need_assist INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE servers ADD COLUMN fact_frequency_hours INTEGER NOT NULL DEFAULT 4",
+            "ALTER TABLE servers ADD COLUMN last_fact_sent TEXT",
         ]
         for stmt in migrations:
             try:
@@ -260,16 +262,17 @@ class DatabaseOperations:
         return self._execute(
             """SELECT guild_id, queue_channel_id, queue_message_id,
                       notification_channel_id, officer_channel_id, manager_role_id, language,
-                      role_drs7, role_drs8, role_drs9, role_drs10, role_drs11, role_drs12
+                      role_drs7, role_drs8, role_drs9, role_drs10, role_drs11, role_drs12,
+                      fact_frequency_hours, last_fact_sent
                FROM servers WHERE guild_id = ?""",
             (guild_id,), fetch_one=True
         )
 
     def get_all_servers(self) -> list[dict]:
-        # FIX: now fetches all columns including language so /officer servers shows correct language
         return self._execute(
             """SELECT guild_id, queue_channel_id, queue_message_id,
-                      notification_channel_id, language
+                      notification_channel_id, officer_channel_id, manager_role_id, language,
+                      fact_frequency_hours, last_fact_sent
                FROM servers""",
             fetch_all=True
         ) or []
@@ -368,11 +371,23 @@ class DatabaseOperations:
         ) is not None
 
     def extend_queue(self, discord_id: int, minutes: int = 30) -> bool:
-        return self._execute(
-            """UPDATE queue_entries SET expires_at = datetime(expires_at, ? || ' minutes')
-               WHERE discord_id = ?""",
-            (f"+{minutes}", discord_id)
-        ) is not None
+        if not self.connection:
+            return False
+        try:
+            with self.connection:
+                cur = self.connection.execute(
+                    """UPDATE queue_entries
+                       SET expires_at = datetime(
+                           CASE WHEN expires_at < datetime('now') THEN datetime('now') ELSE expires_at END,
+                           ? || ' minutes'
+                       )
+                       WHERE discord_id = ?""",
+                    (f"+{minutes}", discord_id)
+                )
+                return cur.rowcount > 0
+        except Exception as e:
+            self.logger.error(f"extend_queue failed: {e}", exc_info=True)
+            return False
 
     def set_quick_start(self, discord_id: int, drs_level: int, value: bool) -> bool:
         return self._execute(
@@ -382,7 +397,7 @@ class DatabaseOperations:
 
     def get_queue_for_level(self, drs_level: int) -> list[dict]:
         rows = self._execute(
-            """SELECT qe.discord_id, u.display_name, qe.expires_at, qe.joined_at, qe.quick_start, u.need_assist
+            """SELECT qe.discord_id, u.display_name, qe.expires_at, qe.joined_at, qe.quick_start, qe.queue_guild_id, u.need_assist
                FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
                WHERE qe.drs_level = ? AND qe.expires_at > datetime('now')
                ORDER BY qe.joined_at ASC""",
@@ -393,11 +408,12 @@ class DatabaseOperations:
         return [{"discord_id": r["discord_id"], "display_name": r["display_name"],
                  "expires_at": _parse_dt(r["expires_at"]), "joined_at": _parse_dt(r["joined_at"]),
                  "quick_start": bool(r["quick_start"]),
+                 "queue_guild_id": r["queue_guild_id"],
                  "need_assist": bool(r.get("need_assist", 0))} for r in rows]
 
     def get_full_queue(self) -> list[dict]:
         rows = self._execute(
-            """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.expires_at, qe.quick_start,
+            """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.expires_at, qe.quick_start, qe.queue_guild_id,
                       u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
                FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
                WHERE qe.expires_at > datetime('now')
@@ -409,6 +425,7 @@ class DatabaseOperations:
         return [{"discord_id": r["discord_id"], "display_name": r["display_name"],
                  "drs_level": r["drs_level"], "expires_at": _parse_dt(r["expires_at"]),
                  "quick_start": bool(r["quick_start"]),
+                 "queue_guild_id": r["queue_guild_id"],
                  "genesis_level": r["genesis_level"], "enrich_level": r["enrich_level"],
                  "modt_level": r["modt_level"],
                  "need_assist": bool(r.get("need_assist", 0))} for r in rows]
@@ -704,4 +721,85 @@ class DatabaseOperations:
             fetch_all=True
         )
         return [r["corp_id"] for r in rows] if rows else []
+
+    # ------------------------------------------------------------------ engagement facts & stats
+
+    def get_fact_frequency(self, guild_id: int) -> int:
+        server = self.get_server(guild_id)
+        if not server or server.get("fact_frequency_hours") is None:
+            return 4
+        return server["fact_frequency_hours"]
+
+    def set_fact_frequency(self, guild_id: int, hours: int) -> bool:
+        return self._execute(
+            "UPDATE servers SET fact_frequency_hours = ? WHERE guild_id = ?",
+            (max(1, hours), guild_id)
+        ) is not None
+
+    def update_last_fact_sent(self, guild_id: int) -> bool:
+        return self._execute(
+            "UPDATE servers SET last_fact_sent = datetime('now') WHERE guild_id = ?",
+            (guild_id,)
+        ) is not None
+
+    def get_top_dr_runners(self, limit: int = 5) -> list[dict]:
+        rows = self._execute(
+            """SELECT u.discord_id, u.display_name, COUNT(mp.match_id) AS run_count
+               FROM match_participants mp
+               JOIN users u ON u.discord_id = mp.discord_id
+               GROUP BY u.discord_id
+               ORDER BY run_count DESC
+               LIMIT ?""",
+            (limit,), fetch_all=True
+        ) or []
+        return [dict(r) for r in rows]
+
+    def get_top_corps(self, limit: int = 5) -> list[dict]:
+        rows = self._execute(
+            """SELECT mp.queue_guild_id, COUNT(DISTINCT mp.match_id) AS total_runs
+               FROM match_participants mp
+               WHERE mp.queue_guild_id IS NOT NULL
+               GROUP BY mp.queue_guild_id
+               ORDER BY total_runs DESC
+               LIMIT ?""",
+            (limit,), fetch_all=True
+        ) or []
+        return [dict(r) for r in rows]
+
+    def get_runs_summary_stats(self) -> dict:
+        row_total = self._execute("SELECT COUNT(*) as cnt FROM matches", fetch_one=True)
+        row_today = self._execute("SELECT COUNT(*) as cnt FROM matches WHERE created_at >= datetime('now', '-1 day')", fetch_one=True)
+        row_week = self._execute("SELECT COUNT(*) as cnt FROM matches WHERE created_at >= datetime('now', '-7 days')", fetch_one=True)
+        row_corps = self._execute("SELECT COUNT(*) as cnt FROM servers", fetch_one=True)
+        return {
+            "total_matches": row_total["cnt"] if row_total else 0,
+            "today_matches": row_today["cnt"] if row_today else 0,
+            "week_matches": row_week["cnt"] if row_week else 0,
+            "total_corps": row_corps["cnt"] if row_corps else 0,
+        }
+
+    def get_drs_level_distribution_stats(self) -> list[dict]:
+        rows = self._execute(
+            """SELECT drs_level, COUNT(*) as cnt
+               FROM matches
+               GROUP BY drs_level
+               ORDER BY cnt DESC""",
+            fetch_all=True
+        ) or []
+        return [dict(r) for r in rows]
+
+    def get_quickstart_vs_standard_stats(self) -> dict:
+        row_qs = self._execute("SELECT COUNT(DISTINCT match_id) as cnt FROM match_participants mp JOIN queue_entries qe ON qe.discord_id = mp.discord_id WHERE qe.quick_start = 1", fetch_one=True)
+        row_total = self._execute("SELECT COUNT(*) as cnt FROM matches", fetch_one=True)
+        total = row_total["cnt"] if row_total else 0
+        qs = row_qs["cnt"] if row_qs else 0
+        return {"total": total, "quickstarts": qs, "standard": max(0, total - qs)}
+
+    def get_feedback_morale_stats(self) -> dict:
+        row_pos = self._execute("SELECT COUNT(*) as cnt FROM feedback WHERE was_positive = 1", fetch_one=True)
+        row_all = self._execute("SELECT COUNT(*) as cnt FROM feedback", fetch_one=True)
+        total = row_all["cnt"] if row_all else 0
+        pos = row_pos["cnt"] if row_pos else 0
+        pct = round((pos / total * 100), 1) if total > 0 else 100.0
+        return {"positive": pos, "total": total, "percentage": pct}
 

@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 import discord
 import config
 
-EMOJI_GENESIS = discord.PartialEmoji(name="Genesis", id=1409872792211554365)
-EMOJI_ENRICH  = discord.PartialEmoji(name="Enrich",  id=1409872795600424960)
+EMOJI_GENESIS = discord.PartialEmoji(name="Genesis", id=1519930122566635652)
+EMOJI_ENRICH  = discord.PartialEmoji(name="Enrich",  id=1519930167005413466)
 EMOJI_MODT    = discord.PartialEmoji(name="ModTRSE", id=1256962175398842399)
 EMOJI_11      = discord.PartialEmoji(name="11",      id=1378449282688090184)
 EMOJI_12      = discord.PartialEmoji(name="12",      id=1378449310831607828)
