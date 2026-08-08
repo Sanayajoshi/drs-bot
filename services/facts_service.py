@@ -166,3 +166,4 @@ class FactsService:
         embed.set_footer(text="Hades Star Community Transmission • DRS Engagement")
         return embed
 
+

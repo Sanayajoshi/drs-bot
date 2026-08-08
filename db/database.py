@@ -789,7 +789,15 @@ class DatabaseOperations:
         return [dict(r) for r in rows]
 
     def get_quickstart_vs_standard_stats(self) -> dict:
-        row_qs = self._execute("SELECT COUNT(DISTINCT match_id) as cnt FROM match_participants mp JOIN queue_entries qe ON qe.discord_id = mp.discord_id WHERE qe.quick_start = 1", fetch_one=True)
+        row_qs = self._execute(
+            f"""SELECT COUNT(*) as cnt FROM (
+                   SELECT match_id, COUNT(discord_id) as p_cnt
+                   FROM match_participants
+                   GROUP BY match_id
+                   HAVING p_cnt < ?
+               )""",
+            (config.MATCH_SIZE,), fetch_one=True
+        )
         row_total = self._execute("SELECT COUNT(*) as cnt FROM matches", fetch_one=True)
         total = row_total["cnt"] if row_total else 0
         qs = row_qs["cnt"] if row_qs else 0
@@ -802,4 +810,5 @@ class DatabaseOperations:
         pos = row_pos["cnt"] if row_pos else 0
         pct = round((pos / total * 100), 1) if total > 0 else 100.0
         return {"positive": pos, "total": total, "percentage": pct}
+
 
