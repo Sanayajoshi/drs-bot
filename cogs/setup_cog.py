@@ -74,7 +74,7 @@ class SetupCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"Server {interaction.guild_id} configured by {interaction.user}")
 
-    @drs.command(name="roles", description="Set ping roles for each DRS level (all optional)")
+    @drs.command(name="roles", description="Set ping roles for each DRS and RS level (all optional)")
     @app_commands.describe(
         drs7="Role to ping when someone joins DRS7",
         drs8="Role to ping when someone joins DRS8",
@@ -82,6 +82,15 @@ class SetupCog(commands.Cog):
         drs10="Role to ping when someone joins DRS10",
         drs11="Role to ping when someone joins DRS11",
         drs12="Role to ping when someone joins DRS12",
+        rs4="Role to ping when someone joins RS4",
+        rs5="Role to ping when someone joins RS5",
+        rs6="Role to ping when someone joins RS6",
+        rs7="Role to ping when someone joins RS7",
+        rs8="Role to ping when someone joins RS8",
+        rs9="Role to ping when someone joins RS9",
+        rs10="Role to ping when someone joins RS10",
+        rs11="Role to ping when someone joins RS11",
+        rs12="Role to ping when someone joins RS12",
     )
     async def roles(
         self,
@@ -92,6 +101,15 @@ class SetupCog(commands.Cog):
         drs10: discord.Role | None = None,
         drs11: discord.Role | None = None,
         drs12: discord.Role | None = None,
+        rs4:   discord.Role | None = None,
+        rs5:   discord.Role | None = None,
+        rs6:   discord.Role | None = None,
+        rs7:   discord.Role | None = None,
+        rs8:   discord.Role | None = None,
+        rs9:   discord.Role | None = None,
+        rs10:  discord.Role | None = None,
+        rs11:  discord.Role | None = None,
+        rs12:  discord.Role | None = None,
     ):
         lang = self._lang(interaction.guild_id)
         if not self._is_authorized(interaction):
@@ -101,24 +119,36 @@ class SetupCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         updates = {}
-        role_map = {7: drs7, 8: drs8, 9: drs9, 10: drs10, 11: drs11, 12: drs12}
-        for level, role in role_map.items():
+        drs_role_map = {7: drs7, 8: drs8, 9: drs9, 10: drs10, 11: drs11, 12: drs12}
+        rs_role_map = {4: rs4, 5: rs5, 6: rs6, 7: rs7, 8: rs8, 9: rs9, 10: rs10, 11: rs11, 12: rs12}
+
+        for level, role in drs_role_map.items():
             if role is not None:
                 updates[f"role_drs{level}"] = role.id
+        for level, role in rs_role_map.items():
+            if role is not None:
+                updates[f"role_rs{level}"] = role.id
 
         if updates:
             self.bot.db.upsert_server(interaction.guild_id, **updates)
 
         embed = discord.Embed(title=t(lang, "setup_roles_success"), color=discord.Color.green())
-        for level, role in role_map.items():
+        for level, role in drs_role_map.items():
             if role is not None:
                 embed.add_field(name=f"DRS{level}", value=role.mention, inline=True)
+        for level, role in rs_role_map.items():
+            if role is not None:
+                embed.add_field(name=f"RS{level}", value=role.mention, inline=True)
 
         server = self.bot.db.get_server(interaction.guild_id)
-        for level in config.DRS_LEVELS:
+        for level in config.VALID_DRS_LEVELS:
             role_id = server.get(f"role_drs{level}") if server else None
-            if role_id and level not in [l for l, r in role_map.items() if r is not None]:
+            if role_id and drs_role_map.get(level) is None:
                 embed.add_field(name=f"DRS{level}", value=f"<@&{role_id}> (existing)", inline=True)
+        for level in config.VALID_RS_LEVELS:
+            role_id = server.get(f"role_rs{level}") if server else None
+            if role_id and rs_role_map.get(level) is None:
+                embed.add_field(name=f"RS{level}", value=f"<@&{role_id}> (existing)", inline=True)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -178,3 +208,4 @@ class SetupCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(SetupCog(bot))
+

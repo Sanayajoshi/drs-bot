@@ -87,12 +87,13 @@ class DatabaseOperations:
             """CREATE TABLE IF NOT EXISTS queue_entries (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 discord_id  INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
-                drs_level   INTEGER NOT NULL CHECK (drs_level BETWEEN 7 AND 12),
+                drs_level   INTEGER NOT NULL CHECK (drs_level BETWEEN 4 AND 12),
                 expires_at  TEXT NOT NULL,
                 joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
                 quick_start    INTEGER NOT NULL DEFAULT 0,
                 queue_guild_id INTEGER,
-                UNIQUE (discord_id, drs_level)
+                queue_type     TEXT NOT NULL DEFAULT 'DRS',
+                UNIQUE (discord_id, drs_level, queue_type)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_queue_drs     ON queue_entries(drs_level)",
             "CREATE INDEX IF NOT EXISTS idx_queue_expires ON queue_entries(expires_at)",
@@ -211,8 +212,32 @@ class DatabaseOperations:
             "CREATE INDEX IF NOT EXISTS idx_cb_guild   ON corp_bonuses(guild_id)",
             "CREATE INDEX IF NOT EXISTS idx_cb_expires ON corp_bonuses(expires_at)",
             "ALTER TABLE users ADD COLUMN need_assist INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN queue_mode TEXT NOT NULL DEFAULT 'DRS'",
+            "ALTER TABLE queue_entries ADD COLUMN queue_type TEXT NOT NULL DEFAULT 'DRS'",
+            "ALTER TABLE matches ADD COLUMN match_type TEXT NOT NULL DEFAULT 'DRS'",
             "ALTER TABLE servers ADD COLUMN fact_frequency_hours INTEGER NOT NULL DEFAULT 4",
             "ALTER TABLE servers ADD COLUMN last_fact_sent TEXT",
+            "ALTER TABLE servers ADD COLUMN role_rs4 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs5 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs6 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs7 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs8 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs9 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs10 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs11 INTEGER",
+            "ALTER TABLE servers ADD COLUMN role_rs12 INTEGER",
+            """CREATE TABLE IF NOT EXISTS queue_wait_logs (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_id            INTEGER NOT NULL,
+                queue_type            TEXT NOT NULL,
+                drs_level             INTEGER NOT NULL,
+                joined_at             TEXT NOT NULL,
+                left_at               TEXT NOT NULL DEFAULT (datetime('now')),
+                wait_duration_seconds INTEGER NOT NULL DEFAULT 0,
+                exit_reason           TEXT NOT NULL,
+                match_id              INTEGER
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_qwl_discord ON queue_wait_logs(discord_id)",
         ]
         for stmt in migrations:
             try:
@@ -220,6 +245,41 @@ class DatabaseOperations:
                 self.connection.commit()
             except Exception:
                 pass
+
+        # Migrate queue_entries table constraint / schema if needed
+        try:
+            cur = self.connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='queue_entries'")
+            row = cur.fetchone()
+            if row and ("BETWEEN 7 AND 12" in row[0] or "queue_type" not in row[0] or "UNIQUE (discord_id, drs_level, queue_type)" not in row[0]):
+                self.logger.info("Migrating queue_entries table constraint to ALLOW levels 4-12 and UNIQUE(discord_id, drs_level, queue_type)...")
+                self.connection.execute("PRAGMA foreign_keys=OFF")
+                self.connection.execute("""
+                    CREATE TABLE queue_entries_new (
+                        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                        discord_id  INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                        drs_level   INTEGER NOT NULL CHECK (drs_level BETWEEN 4 AND 12),
+                        expires_at  TEXT NOT NULL,
+                        joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                        quick_start    INTEGER NOT NULL DEFAULT 0,
+                        queue_guild_id INTEGER,
+                        queue_type     TEXT NOT NULL DEFAULT 'DRS',
+                        UNIQUE (discord_id, drs_level, queue_type)
+                    )
+                """)
+                self.connection.execute("""
+                    INSERT OR IGNORE INTO queue_entries_new (id, discord_id, drs_level, expires_at, joined_at, quick_start, queue_guild_id, queue_type)
+                    SELECT id, discord_id, drs_level, expires_at, joined_at, quick_start, queue_guild_id, COALESCE(queue_type, 'DRS')
+                    FROM queue_entries
+                """)
+                self.connection.execute("DROP TABLE queue_entries")
+                self.connection.execute("ALTER TABLE queue_entries_new RENAME TO queue_entries")
+                self.connection.execute("CREATE INDEX IF NOT EXISTS idx_queue_drs ON queue_entries(drs_level)")
+                self.connection.execute("CREATE INDEX IF NOT EXISTS idx_queue_expires ON queue_entries(expires_at)")
+                self.connection.execute("PRAGMA foreign_keys=ON")
+                self.connection.commit()
+                self.logger.info("Successfully migrated queue_entries table constraint!")
+        except Exception as e:
+            self.logger.error(f"Failed to migrate queue_entries table: {e}")
 
     def _execute(self, query, params=(), fetch_one=False, fetch_all=False):
         if not self.connection:
@@ -331,12 +391,31 @@ class DatabaseOperations:
 
     def get_user(self, discord_id: int) -> dict | None:
         row = self._execute(
-            "SELECT discord_id, display_name, genesis_level, enrich_level, modt_level, need_assist FROM users WHERE discord_id = ?",
+            "SELECT discord_id, display_name, genesis_level, enrich_level, modt_level, need_assist, queue_mode FROM users WHERE discord_id = ?",
             (discord_id,), fetch_one=True
         )
         if row:
             row["need_assist"] = bool(row.get("need_assist", 0))
+            if not row.get("queue_mode"):
+                row["queue_mode"] = "DRS"
         return row
+
+    def get_user_queue_mode(self, discord_id: int) -> str:
+        user = self.get_user(discord_id)
+        if user and user.get("queue_mode"):
+            return user["queue_mode"]
+        return "DRS"
+
+    def toggle_user_queue_mode(self, discord_id: int, display_name: str = None) -> str:
+        current = self.get_user_queue_mode(discord_id)
+        new_mode = "RS" if current == "DRS" else "DRS"
+        if display_name:
+            self.upsert_user(discord_id, display_name)
+        self._execute(
+            "UPDATE users SET queue_mode = ? WHERE discord_id = ?",
+            (new_mode, discord_id)
+        )
+        return new_mode
 
     def set_need_assist(self, discord_id: int, need_assist: bool) -> bool:
         return self._execute(
@@ -351,24 +430,82 @@ class DatabaseOperations:
         self.set_need_assist(discord_id, new_val)
         return new_val
 
-    def join_queue(self, discord_id: int, drs_level: int, expires_at: datetime, guild_id: int = None) -> bool:
+    def log_queue_wait(self, discord_id: int, queue_type: str, drs_level: int, joined_at: str, exit_reason: str, match_id: int = None):
+        if not joined_at:
+            joined_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            j_dt = _parse_dt(joined_at) or datetime.utcnow().replace(tzinfo=timezone.utc)
+            now_dt = datetime.utcnow().replace(tzinfo=timezone.utc)
+            duration = int((now_dt - j_dt).total_seconds())
+            if duration < 0:
+                duration = 0
+        except Exception:
+            duration = 0
+
+        self._execute(
+            """INSERT INTO queue_wait_logs 
+               (discord_id, queue_type, drs_level, joined_at, left_at, wait_duration_seconds, exit_reason, match_id)
+               VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?)""",
+            (discord_id, queue_type, drs_level, str(joined_at), duration, exit_reason, match_id)
+        )
+
+    def join_queue(self, discord_id: int, drs_level: int, expires_at: datetime, guild_id: int = None, queue_type: str = "DRS") -> bool:
         expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S")
+        joined_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         return self._execute(
-            """INSERT INTO queue_entries (discord_id, drs_level, expires_at, queue_guild_id) VALUES (?, ?, ?, ?)
-               ON CONFLICT(discord_id, drs_level) DO UPDATE SET expires_at = excluded.expires_at, queue_guild_id = excluded.queue_guild_id""",
-            (discord_id, drs_level, expires_str, guild_id)
+            """INSERT INTO queue_entries (discord_id, drs_level, queue_type, expires_at, joined_at, queue_guild_id) VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(discord_id, drs_level, queue_type) DO UPDATE SET expires_at = excluded.expires_at, queue_guild_id = excluded.queue_guild_id""",
+            (discord_id, drs_level, queue_type, expires_str, joined_str, guild_id)
         ) is not None
 
-    def leave_queue(self, discord_id: int) -> bool:
-        return self._execute(
-            "DELETE FROM queue_entries WHERE discord_id = ?", (discord_id,)
-        ) is not None
+    def leave_queue(self, discord_id: int, queue_type: str = None, reason: str = "manual_exit", match_id: int = None) -> bool:
+        # Log wait times before deletion
+        if queue_type:
+            entries = self._execute(
+                "SELECT drs_level, queue_type, joined_at FROM queue_entries WHERE discord_id = ? AND queue_type = ?",
+                (discord_id, queue_type), fetch_all=True
+            ) or []
+        else:
+            entries = self._execute(
+                "SELECT drs_level, queue_type, joined_at FROM queue_entries WHERE discord_id = ?",
+                (discord_id,), fetch_all=True
+            ) or []
 
-    def leave_queue_level(self, discord_id: int, drs_level: int) -> bool:
+        for e in entries:
+            self.log_queue_wait(discord_id, e.get("queue_type", "DRS"), e["drs_level"], e.get("joined_at"), reason, match_id)
+
+        if queue_type:
+            return self._execute("DELETE FROM queue_entries WHERE discord_id = ? AND queue_type = ?", (discord_id, queue_type)) is not None
+        return self._execute("DELETE FROM queue_entries WHERE discord_id = ?", (discord_id,)) is not None
+
+    def leave_queue_level(self, discord_id: int, drs_level: int, queue_type: str = None, reason: str = "manual_exit", match_id: int = None) -> bool:
+        if queue_type:
+            entries = self._execute(
+                "SELECT drs_level, queue_type, joined_at FROM queue_entries WHERE discord_id = ? AND drs_level = ? AND queue_type = ?",
+                (discord_id, drs_level, queue_type), fetch_all=True
+            ) or []
+        else:
+            entries = self._execute(
+                "SELECT drs_level, queue_type, joined_at FROM queue_entries WHERE discord_id = ? AND drs_level = ?",
+                (discord_id, drs_level), fetch_all=True
+            ) or []
+
+        for e in entries:
+            self.log_queue_wait(discord_id, e.get("queue_type", "DRS"), e["drs_level"], e.get("joined_at"), reason, match_id)
+
+        if queue_type:
+            return self._execute(
+                "DELETE FROM queue_entries WHERE discord_id = ? AND drs_level = ? AND queue_type = ?",
+                (discord_id, drs_level, queue_type)
+            ) is not None
         return self._execute(
             "DELETE FROM queue_entries WHERE discord_id = ? AND drs_level = ?",
             (discord_id, drs_level)
         ) is not None
+
+    def eject_player_from_all_queues(self, discord_id: int, reason: str = "matched", match_id: int = None) -> bool:
+        """Ejects a player from all current incomplete queues and logs wait times."""
+        return self.leave_queue(discord_id, reason=reason, match_id=match_id)
 
     def extend_queue(self, discord_id: int, minutes: int = 30) -> bool:
         if not self.connection:
@@ -389,19 +526,24 @@ class DatabaseOperations:
             self.logger.error(f"extend_queue failed: {e}", exc_info=True)
             return False
 
-    def set_quick_start(self, discord_id: int, drs_level: int, value: bool) -> bool:
+    def set_quick_start(self, discord_id: int, drs_level: int, value: bool, queue_type: str = None) -> bool:
+        if queue_type:
+            return self._execute(
+                "UPDATE queue_entries SET quick_start = ? WHERE discord_id = ? AND drs_level = ? AND queue_type = ?",
+                (1 if value else 0, discord_id, drs_level, queue_type)
+            ) is not None
         return self._execute(
             "UPDATE queue_entries SET quick_start = ? WHERE discord_id = ? AND drs_level = ?",
             (1 if value else 0, discord_id, drs_level)
         ) is not None
 
-    def get_queue_for_level(self, drs_level: int) -> list[dict]:
+    def get_queue_for_level(self, drs_level: int, queue_type: str = "DRS") -> list[dict]:
         rows = self._execute(
-            """SELECT qe.discord_id, u.display_name, qe.expires_at, qe.joined_at, qe.quick_start, qe.queue_guild_id, u.need_assist
+            """SELECT qe.discord_id, u.display_name, qe.expires_at, qe.joined_at, qe.quick_start, qe.queue_guild_id, qe.queue_type, u.need_assist
                FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
-               WHERE qe.drs_level = ? AND qe.expires_at > datetime('now')
+               WHERE qe.drs_level = ? AND qe.queue_type = ? AND qe.expires_at > datetime('now')
                ORDER BY qe.joined_at ASC""",
-            (drs_level,), fetch_all=True
+            (drs_level, queue_type), fetch_all=True
         )
         if not rows:
             return []
@@ -409,21 +551,33 @@ class DatabaseOperations:
                  "expires_at": _parse_dt(r["expires_at"]), "joined_at": _parse_dt(r["joined_at"]),
                  "quick_start": bool(r["quick_start"]),
                  "queue_guild_id": r["queue_guild_id"],
+                 "queue_type": r.get("queue_type", "DRS"),
                  "need_assist": bool(r.get("need_assist", 0))} for r in rows]
 
-    def get_full_queue(self) -> list[dict]:
-        rows = self._execute(
-            """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.expires_at, qe.quick_start, qe.queue_guild_id,
-                      u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
-               FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
-               WHERE qe.expires_at > datetime('now')
-               ORDER BY qe.drs_level, qe.joined_at ASC""",
-            fetch_all=True
-        )
+    def get_full_queue(self, queue_type: str = None) -> list[dict]:
+        if queue_type:
+            rows = self._execute(
+                """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
+                          u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
+                   FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
+                   WHERE qe.queue_type = ? AND qe.expires_at > datetime('now')
+                   ORDER BY qe.drs_level, qe.joined_at ASC""",
+                (queue_type,), fetch_all=True
+            )
+        else:
+            rows = self._execute(
+                """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
+                          u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
+                   FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
+                   WHERE qe.expires_at > datetime('now')
+                   ORDER BY qe.queue_type DESC, qe.drs_level, qe.joined_at ASC""",
+                fetch_all=True
+            )
         if not rows:
             return []
         return [{"discord_id": r["discord_id"], "display_name": r["display_name"],
-                 "drs_level": r["drs_level"], "expires_at": _parse_dt(r["expires_at"]),
+                 "drs_level": r["drs_level"], "queue_type": r.get("queue_type", "DRS"),
+                 "expires_at": _parse_dt(r["expires_at"]),
                  "quick_start": bool(r["quick_start"]),
                  "queue_guild_id": r["queue_guild_id"],
                  "genesis_level": r["genesis_level"], "enrich_level": r["enrich_level"],
@@ -435,9 +589,12 @@ class DatabaseOperations:
             return []
         try:
             cur = self.connection.execute(
-                "SELECT discord_id FROM queue_entries WHERE expires_at <= datetime('now')"
+                "SELECT discord_id, queue_type, drs_level, joined_at FROM queue_entries WHERE expires_at <= datetime('now')"
             )
-            ids = [r[0] for r in cur.fetchall()]
+            expired = [dict(r) for r in cur.fetchall()]
+            ids = [r["discord_id"] for r in expired]
+            for r in expired:
+                self.log_queue_wait(r["discord_id"], r.get("queue_type", "DRS"), r["drs_level"], r.get("joined_at"), "expired")
             if ids:
                 self.connection.execute(
                     "DELETE FROM queue_entries WHERE expires_at <= datetime('now')"
@@ -448,34 +605,40 @@ class DatabaseOperations:
             self.logger.error(f"remove_expired_entries failed: {e}")
             return []
 
-    def is_user_queued_for_level(self, discord_id: int, drs_level: int) -> bool:
-        row = self._execute(
-            """SELECT 1 FROM queue_entries
-               WHERE discord_id = ? AND drs_level = ? AND expires_at > datetime('now')""",
-            (discord_id, drs_level), fetch_one=True
-        )
+    def is_user_queued_for_level(self, discord_id: int, drs_level: int, queue_type: str = None) -> bool:
+        if queue_type:
+            row = self._execute(
+                """SELECT 1 FROM queue_entries
+                   WHERE discord_id = ? AND drs_level = ? AND queue_type = ? AND expires_at > datetime('now')""",
+                (discord_id, drs_level, queue_type), fetch_one=True
+            )
+        else:
+            row = self._execute(
+                """SELECT 1 FROM queue_entries
+                   WHERE discord_id = ? AND drs_level = ? AND expires_at > datetime('now')""",
+                (discord_id, drs_level), fetch_one=True
+            )
         return row is not None
 
-    def get_user_queue_levels(self, discord_id: int) -> list[int]:
+    def get_user_queue_levels(self, discord_id: int) -> list[dict]:
         rows = self._execute(
-            "SELECT drs_level FROM queue_entries WHERE discord_id = ? AND expires_at > datetime('now')",
+            "SELECT drs_level, queue_type FROM queue_entries WHERE discord_id = ? AND expires_at > datetime('now')",
             (discord_id,), fetch_all=True
         )
-        return [r["drs_level"] for r in rows] if rows else []
+        return [{"drs_level": r["drs_level"], "queue_type": r.get("queue_type", "DRS")} for r in rows] if rows else []
 
     def create_match(self, drs_level: int, participant_ids: list[int],
-                     queue_guild_map: dict[int, int] | None = None) -> int | None:
+                     queue_guild_map: dict[int, int] | None = None, match_type: str = "DRS") -> int | None:
         """
         Create a match and record participants.
-        queue_guild_map: {discord_id: queue_guild_id} — captured from queue_entries
-        BEFORE they are deleted, so we preserve which guild each player joined from.
+        queue_guild_map: {discord_id: queue_guild_id}
         """
         if not self.connection:
             return None
         try:
             with self.connection:
                 cur = self.connection.execute(
-                    "INSERT INTO matches (drs_level) VALUES (?)", (drs_level,)
+                    "INSERT INTO matches (drs_level, match_type) VALUES (?, ?)", (drs_level, match_type)
                 )
                 match_id = cur.lastrowid
                 for uid in participant_ids:
@@ -810,5 +973,6 @@ class DatabaseOperations:
         pos = row_pos["cnt"] if row_pos else 0
         pct = round((pos / total * 100), 1) if total > 0 else 100.0
         return {"positive": pos, "total": total, "percentage": pct}
+
 
 

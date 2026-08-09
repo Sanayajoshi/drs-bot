@@ -49,7 +49,7 @@ class ThreadCog(commands.Cog):
     # ------------------------------------------------------------------
 
     @commands.Cog.listener()
-    async def on_drs_create_threads(self, match_id: int, drs_level: int, participants: list[dict]):
+    async def on_drs_create_threads(self, match_id: int, drs_level: int, participants: list[dict], queue_type: str = "DRS"):
         participant_ids = [p["discord_id"] for p in participants]
 
         # queue_guild_id is now stored on match_participants — reliable after queue deletion
@@ -108,7 +108,7 @@ class ThreadCog(commands.Cog):
 
             lang        = server.get("language", "en")
             mentions    = " ".join(f"<@{uid}>" for uid in present_ids)
-            thread_name = f"DRS{drs_level} Match #{match_id}"
+            thread_name = f"{queue_type}{drs_level} Match #{match_id}"
 
             try:
                 thread = await channel.create_thread(
@@ -118,7 +118,7 @@ class ThreadCog(commands.Cog):
 
                 match_embed = self._build_match_embed(
                     match_id, drs_level, participants, id_to_corp,
-                    gen_best_ids, enr_best_ids, lang
+                    gen_best_ids, enr_best_ids, lang, queue_type=queue_type
                 )
                 bell_view = self.thread_service.build_bell_view(match_id)
 
@@ -165,10 +165,18 @@ class ThreadCog(commands.Cog):
         gen_best_ids: set[int],
         enr_best_ids: set[int],
         lang: str,
+        queue_type: str = "DRS",
     ) -> discord.Embed:
+        if queue_type == "RS":
+            title = f"🔴 Red Star {drs_level} — Match #{match_id}"
+            color = discord.Color.red()
+        else:
+            title = t(lang, "match_title", level=drs_level, match_id=match_id)
+            color = discord.Color.dark_red()
+
         embed = discord.Embed(
-            title=t(lang, "match_title", level=drs_level, match_id=match_id),
-            color=discord.Color.dark_red()
+            title=title,
+            color=color
         )
 
         rows = []
@@ -402,4 +410,5 @@ class ThreadCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ThreadCog(bot))
+
 

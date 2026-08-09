@@ -14,64 +14,66 @@ class QueueService:
     def set_dispatch(self, dispatch_fn):
         self._dispatch = dispatch_fn
 
-    async def join(self, discord_id: int, display_name: str, drs_level: int, guild_id: int) -> str:
-        if self.db.is_user_queued_for_level(discord_id, drs_level):
+    def remove_expired(self) -> list[int]:
+        return self.db.remove_expired_entries()
+
+    def remove_expired_entries(self) -> list[int]:
+        return self.db.remove_expired_entries()
+
+    async def join(self, discord_id: int, display_name: str, drs_level: int, guild_id: int, queue_type: str = "DRS") -> str:
+        if self.db.is_user_queued_for_level(discord_id, drs_level, queue_type):
             return "already_queued_for_level"
 
-        expires_at = datetime.utcnow() + timedelta(minutes=config.DEFAULT_QUEUE_MINS)
-        self.db.join_queue(discord_id, drs_level, expires_at, guild_id)
+        expires_at = datetime.utcnow() + timedelta(minutes=config.DEFAULT_EXPIRY_MINS)
+        self.db.join_queue(discord_id, drs_level, expires_at, guild_id, queue_type=queue_type)
 
-        entries = self.db.get_queue_for_level(drs_level)
-        if len(entries) >= config.MATCH_SIZE:
-            await self._form_match(drs_level, entries[:config.MATCH_SIZE])
+        target_size = config.DRS_MATCH_SIZE if queue_type == "DRS" else config.RS_MATCH_SIZE
+        entries = self.db.get_queue_for_level(drs_level, queue_type=queue_type)
+        if len(entries) >= target_size:
+            await self._form_match(drs_level, entries[:target_size], queue_type=queue_type)
             return "match_formed"
 
         return "joined"
 
-    async def quick_start_match(self, drs_level: int, entries: list[dict]) -> str:
-        """Force a match with exactly 2 players — both must have quick_start set."""
-        if len(entries) < 2:
+    async def check_quick_start(self, drs_level: int, queue_type: str = "DRS") -> str:
+        """
+        Check if quick start conditions are met:
+        - DRS (max 3): 2 players in queue and both accept quick start.
+        - RS (max 4): 2 or 3 players in queue and ALL players in queue accept quick start.
+        """
+        entries = self.db.get_queue_for_level(drs_level, queue_type=queue_type)
+        count = len(entries)
+        if count < 2:
             return "not_enough_players"
 
-        two = entries[:2]
-        participant_ids = [e["discord_id"] for e in two]
+        target_size = config.DRS_MATCH_SIZE if queue_type == "DRS" else config.RS_MATCH_SIZE
+        if count >= target_size:
+            # Full match should be formed
+            await self._form_match(drs_level, entries[:target_size], queue_type=queue_type)
+            return "match_formed"
 
-        # Capture queue_guild_id BEFORE deleting entries
-        queue_guild_map = self._capture_queue_guilds(participant_ids, drs_level)
+        # Check if all currently queued players have quick_start set
+        if all(e.get("quick_start") for e in entries):
+            await self._form_match(drs_level, entries, queue_type=queue_type)
+            return "match_formed"
 
-        for pid in participant_ids:
-            self.db.leave_queue(pid)
+        return "quick_start_updated"
 
-        match_id = self.db.create_match(drs_level, participant_ids, queue_guild_map)
-        if not match_id:
-            logger.error(f"quick_start_match: failed to create match for DRS{drs_level}")
-            return "db_error"
-
-        participants = [
-            {"discord_id": e["discord_id"], "display_name": e["display_name"]}
-            for e in two
-        ]
-
-        if self._dispatch:
-            self._dispatch("drs_match_formed", match_id, drs_level, participants)
-        else:
-            logger.error("QueueService has no dispatch function — match event lost!")
-
-        return "match_formed"
-
-    async def _form_match(self, drs_level: int, entries: list[dict]):
+    async def _form_match(self, drs_level: int, entries: list[dict], queue_type: str = "DRS"):
         participant_ids = [e["discord_id"] for e in entries]
 
         # Capture queue_guild_id BEFORE deleting entries
-        queue_guild_map = self._capture_queue_guilds(participant_ids, drs_level)
+        queue_guild_map = self._capture_queue_guilds(participant_ids, drs_level, queue_type)
 
-        for pid in participant_ids:
-            self.db.leave_queue(pid)
-
-        match_id = self.db.create_match(drs_level, participant_ids, queue_guild_map)
+        # Create match in DB
+        match_id = self.db.create_match(drs_level, participant_ids, queue_guild_map, match_type=queue_type)
         if not match_id:
-            logger.error(f"Failed to create match record for DRS{drs_level}")
+            logger.error(f"Failed to create match record for {queue_type} Level {drs_level}")
             return
+
+        # Eject players from ALL incomplete queues they joined and log wait times
+        for pid in participant_ids:
+            self.db.eject_player_from_all_queues(pid, reason="matched", match_id=match_id)
 
         participants = [
             {"discord_id": e["discord_id"], "display_name": e["display_name"]}
@@ -79,11 +81,11 @@ class QueueService:
         ]
 
         if self._dispatch:
-            self._dispatch("drs_match_formed", match_id, drs_level, participants)
+            self._dispatch("drs_match_formed", match_id, drs_level, participants, queue_type)
         else:
             logger.error("QueueService has no dispatch function — match event lost!")
 
-    def _capture_queue_guilds(self, participant_ids: list[int], drs_level: int) -> dict[int, int]:
+    def _capture_queue_guilds(self, participant_ids: list[int], drs_level: int, queue_type: str = "DRS") -> dict[int, int]:
         """
         Read queue_guild_id from queue_entries for each participant RIGHT NOW,
         before the entries are deleted. Returns {discord_id: queue_guild_id}.
@@ -93,8 +95,8 @@ class QueueService:
         placeholders = ",".join(["?"] * len(participant_ids))
         rows = self.db._execute(
             f"""SELECT discord_id, queue_guild_id FROM queue_entries
-                WHERE discord_id IN ({placeholders}) AND drs_level = ?""",
-            participant_ids + [drs_level],
+                WHERE discord_id IN ({placeholders}) AND drs_level = ? AND queue_type = ?""",
+            participant_ids + [drs_level, queue_type],
             fetch_all=True,
         )
         result = {}
@@ -103,3 +105,4 @@ class QueueService:
                 if r.get("queue_guild_id"):
                     result[r["discord_id"]] = r["queue_guild_id"]
         return result
+

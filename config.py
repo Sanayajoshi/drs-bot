@@ -1,30 +1,51 @@
 import os
 
-# Bot token — set in .env or environment
-BOT_TOKEN = os.getenv("TOKEN")
+# Bot Token
+BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 
-# SQLite database file path
+# Web Dashboard Port
+PORT = int(os.getenv("PORT", 3000))
+
+# Database
 DB_PATH = os.getenv("DB_PATH", "drs_bot.db")
 
 # Queue settings
 QUEUE_SIZE         = 2
 MATCH_SIZE         = 3
-DRS_LEVELS = [7, 8, 9, 10, 11, 12]
+DRS_MATCH_SIZE     = 3
+RS_MATCH_SIZE      = 4
+DRS_LEVELS         = [7, 8, 9, 10, 11, 12]
+VALID_DRS_LEVELS   = [7, 8, 9, 10, 11, 12]
+VALID_RS_LEVELS    = [4, 5, 6, 7, 8, 9, 10, 11, 12]
 DEFAULT_QUEUE_MINS = 30
+DEFAULT_EXPIRY_MINS = 30
 EXTEND_MINS        = 30
 
 # Background task intervals (seconds)
+SYNC_INTERVAL_SECS   = 60
 EXPIRY_INTERVAL_SECS = 30
 
-# Feedback delay after match creation
+# Feedback settings
 FEEDBACK_DELAY_MINS = 30
 
-# Supported languages
+# i18n
+DEFAULT_LANGUAGE = "en"
 SUPPORTED_LANGUAGES = ["en", "ja", "es", "de", "hi", "pl", "fr"]
 
-# Developer Discord user IDs — always have full bot access
-DEV_USER_IDS = [508209182374363137]
-# Developer & Super Admin Discord user IDs — full bot access and admin command execution
+# Developer / Super Admin User IDs
 DEV_USER_IDS = [508209182374363137, 702623662531936356, 670486428743892993]
 SUPER_ADMIN_IDS = [508209182374363137, 702623662531936356, 670486428743892993]
 
+# Custom Emojis & Icons
+EMOJI_DRS = "<:drs:1535712886691733585>"
+EMOJI_RS = "<:rs:1535712952894885969>"
+EMOJI_SWITCH = "<:switch:1535714231565951076>"
+EMOJI_GENESIS = "<:Genesis:1519930122566635652>"
+EMOJI_ENRICH = "<:Enrich:1519930167005413466>"
+EMOJI_MODT = "<:ModTRSE:1256962175398842399>"
+EMOJI_11 = "<:11:1378449282688090184>"
+EMOJI_12 = "<:12:1378449310831607828>"
+EMOJI_QUICKSTART = "▶️"
+EMOJI_EXIT = "❌"
+EMOJI_TECH = "🛠️"
+EMOJI_SOS = "🆘"
