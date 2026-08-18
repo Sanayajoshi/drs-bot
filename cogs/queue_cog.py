@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands, tasks
 import config
 from services.queue_service import QueueService
-from services.ui_service import build_queue_embeds, build_queue_view, CombinedTechView
+from services.ui_service import build_queue_embeds, build_queue_view, CombinedTechView, QueueModeSettingsView
 from services.i18n import get as t
 
 logger = logging.getLogger("queue_cog")
@@ -257,11 +257,19 @@ class QueueCog(commands.Cog):
 
     async def _handle_mode_switch(self, interaction: discord.Interaction):
         discord_id = interaction.user.id
-        new_mode = self.bot.db.toggle_user_queue_mode(discord_id)
-        
-        mode_icon = "<:drs:1535712886691733585>" if new_mode == "DRS" else "<:rs:1535712952894885969>"
+        display_name = interaction.user.display_name
+        self.bot.db.upsert_user(discord_id, display_name)
+        current_mode = self.bot.db.get_user_queue_mode(discord_id)
+
+        if current_mode == "DRS":
+            content = "Queue Mode Settings\nYour current active mode is Dark Red Star (DRS)."
+        else:
+            content = "Queue Mode Settings\nYour current active mode is Red Star (RS)."
+
+        view = QueueModeSettingsView(self.bot.db, discord_id, current_mode, display_name)
         await interaction.response.send_message(
-            f"🔄 Mode switched! Your active queue mode is now **{new_mode}** {mode_icon}.",
+            content,
+            view=view,
             ephemeral=True
         )
 
@@ -418,5 +426,6 @@ class QueueCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(QueueCog(bot))
+
 
 

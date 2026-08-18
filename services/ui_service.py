@@ -38,6 +38,15 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
     DRS_ICON = config.EMOJI_DRS
     RS_ICON = config.EMOJI_RS
 
+    HINTS = [
+        f"4️⃣–{config.EMOJI_12} - Join/Leave Queue",
+        f"{config.EMOJI_SWITCH} - Switch Mode (DRS / RS)",
+        f"{config.EMOJI_QUICKSTART} - Quick Start",
+        f"{config.EMOJI_EXIT} - Exit All Queues",
+        f"{config.EMOJI_TECH} - Set Tech",
+        f"{config.EMOJI_SOS} - Need Assist On/Off",
+    ]
+
     # 1. Dark Red Star Queue Embed
     drs_embed = discord.Embed(title=f"{DRS_ICON} Dark Red Star Queue", color=discord.Color.dark_red())
     drs_by_level = {lvl: [] for lvl in config.VALID_DRS_LEVELS}
@@ -73,7 +82,18 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
     if not has_drs:
         drs_embed.description = "*No pilots in Dark Red Star queue.*"
 
-    # 2. Red Star Queue Embed
+    # Add random Hint section
+    hint_idx = random.randint(0, len(HINTS) - 1)
+    hint_num = hint_idx + 1
+    hint_text = HINTS[hint_idx]
+    drs_embed.add_field(
+        name="\u200b",
+        value=f"-----\n> -# 💡 ┃ {hint_text}",
+        inline=False
+    )
+    drs_embed.set_footer(text=t(lang, "queue_footer"))
+
+    # 2. Red Star Queue Embed (only shown when there is a player in RS queue)
     rs_embed = discord.Embed(title=f"{RS_ICON} Red Star Queue", color=discord.Color.red())
     rs_by_level = {lvl: [] for lvl in config.VALID_RS_LEVELS}
     for entry in full_queue_data:
@@ -105,22 +125,12 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
             inline=False
         )
 
-    if not has_rs:
-        rs_embed.description = "*No pilots in Red Star queue.*"
+    embeds = [drs_embed]
+    if has_rs:
+        rs_embed.set_footer(text=t(lang, "queue_footer"))
+        embeds.append(rs_embed)
 
-    # 3. Helper Embed
-    helper_embed = discord.Embed(title="Legend & Controls", color=discord.Color.blue())
-    helper_embed.description = (
-        f"> `4️⃣–1️⃣2️⃣`: Join/Leave Queue\n"
-        f"> {config.EMOJI_SWITCH}: Switch Mode (DRS / RS)\n"
-        f"> `{config.EMOJI_QUICKSTART}`: Quick Start\n"
-        f"> `{config.EMOJI_EXIT}`: Exit All Queues\n"
-        f"> `{config.EMOJI_TECH}`: Set Tech\n"
-        f"> `{config.EMOJI_SOS}`: Need Assist On/Off"
-    )
-    helper_embed.set_footer(text=t(lang, "queue_footer"))
-
-    return [drs_embed, rs_embed, helper_embed]
+    return embeds
 
 
 def build_queue_embed(queue_data: list[dict], lang: str = "en") -> discord.Embed:
@@ -291,6 +301,75 @@ class CombinedTechView(discord.ui.View):
         )
 
 
+class QueueModeSettingsView(discord.ui.View):
+    def __init__(self, db, discord_id: int, current_mode: str, display_name: str = None):
+        super().__init__(timeout=120)
+        self.db = db
+        self.discord_id = discord_id
+        self.current_mode = current_mode
+        self.display_name = display_name
+
+        if current_mode == "DRS":
+            keep_btn = discord.ui.Button(
+                label="Keep DRS (Active)",
+                style=discord.ButtonStyle.success,
+                emoji=parse_emoji(config.EMOJI_DRS),
+                custom_id="drs_mode_keep"
+            )
+            keep_btn.callback = self.on_keep
+            self.add_item(keep_btn)
+
+            switch_btn = discord.ui.Button(
+                label="Switch to Red Star (RS)",
+                style=discord.ButtonStyle.danger,
+                emoji=parse_emoji(config.EMOJI_RS),
+                custom_id="drs_mode_switch_to_rs"
+            )
+            switch_btn.callback = self.on_switch_rs
+            self.add_item(switch_btn)
+        else:
+            keep_btn = discord.ui.Button(
+                label="Keep RS (Active)",
+                style=discord.ButtonStyle.success,
+                emoji=parse_emoji(config.EMOJI_RS),
+                custom_id="rs_mode_keep"
+            )
+            keep_btn.callback = self.on_keep
+            self.add_item(keep_btn)
+
+            switch_btn = discord.ui.Button(
+                label="Switch to Dark Red Star (DRS)",
+                style=discord.ButtonStyle.danger,
+                emoji=parse_emoji(config.EMOJI_DRS),
+                custom_id="rs_mode_switch_to_drs"
+            )
+            switch_btn.callback = self.on_switch_drs
+            self.add_item(switch_btn)
+
+    async def on_keep(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception:
+            pass
+
+    async def on_switch_rs(self, interaction: discord.Interaction):
+        self.db.set_user_queue_mode(self.discord_id, "RS", self.display_name)
+        try:
+            await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception:
+            pass
+
+    async def on_switch_drs(self, interaction: discord.Interaction):
+        self.db.set_user_queue_mode(self.discord_id, "DRS", self.display_name)
+        try:
+            await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception:
+            pass
+
+
 def _format_remaining(expires_at: datetime) -> str:
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     if expires_at.tzinfo is None:
@@ -300,6 +379,7 @@ def _format_remaining(expires_at: datetime) -> str:
         return "0m"
     mins = max(1, round(delta.total_seconds() / 60))
     return f"{mins}m"
+
 
 
 

@@ -406,16 +406,19 @@ class DatabaseOperations:
             return user["queue_mode"]
         return "DRS"
 
-    def toggle_user_queue_mode(self, discord_id: int, display_name: str = None) -> str:
-        current = self.get_user_queue_mode(discord_id)
-        new_mode = "RS" if current == "DRS" else "DRS"
+    def set_user_queue_mode(self, discord_id: int, mode: str, display_name: str = None) -> str:
         if display_name:
             self.upsert_user(discord_id, display_name)
         self._execute(
             "UPDATE users SET queue_mode = ? WHERE discord_id = ?",
-            (new_mode, discord_id)
+            (mode, discord_id)
         )
-        return new_mode
+        return mode
+
+    def toggle_user_queue_mode(self, discord_id: int, display_name: str = None) -> str:
+        current = self.get_user_queue_mode(discord_id)
+        new_mode = "RS" if current == "DRS" else "DRS"
+        return self.set_user_queue_mode(discord_id, new_mode, display_name)
 
     def set_need_assist(self, discord_id: int, need_assist: bool) -> bool:
         return self._execute(
@@ -973,6 +976,7 @@ class DatabaseOperations:
         pos = row_pos["cnt"] if row_pos else 0
         pct = round((pos / total * 100), 1) if total > 0 else 100.0
         return {"positive": pos, "total": total, "percentage": pct}
+
 
 
 

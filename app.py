@@ -2,6 +2,7 @@ import asyncio
 import logging
 import discord
 from discord.ext import commands
+from aiohttp import web
 from dotenv import load_dotenv
 load_dotenv()  # loads .env file
 
@@ -45,6 +46,7 @@ class DRSBot(commands.Bot):
             "cogs.officer_cog",
             "cogs.bonus_cog",  # New bonus cog
             "cogs.engagement_cog",  # Engagement & Facts cog
+            "cogs.stats_cog",  # Player stats cog
         ]
         for cog in cogs:
             try:
@@ -98,9 +100,90 @@ class DRSBot(commands.Bot):
         await super().close()
 
 
-if __name__ == "__main__":
-    if not config.BOT_TOKEN:
-        raise RuntimeError("DISCORD_BOT_TOKEN environment variable not set.")
+async def start_web_server(bot: DRSBot):
+    routes = web.RouteTableDef()
+
+    @routes.get('/')
+    async def index_handler(request):
+        is_ready = bot.is_ready()
+        bot_status = "Connected & Online" if is_ready else "Running (Waiting for Discord Token)"
+        bot_user = str(bot.user) if bot.user else "Not logged in"
+        status_class = "online" if is_ready else "pending"
+        
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>DRS Bot Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }}
+        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 500px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }}
+        h1 {{ margin-top: 0; color: #f43f5e; font-size: 1.75rem; display: flex; align-items: center; gap: 10px; }}
+        .status {{ display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; margin-bottom: 20px; }}
+        .status.online {{ background: #065f46; color: #34d399; }}
+        .status.pending {{ background: #854d0e; color: #fde047; }}
+        .info-group {{ margin-bottom: 16px; background: #0f172a; padding: 12px 16px; border-radius: 8px; border: 1px solid #334155; }}
+        .label {{ font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }}
+        .value {{ font-size: 1rem; font-weight: 500; margin-top: 4px; color: #f8fafc; }}
+        .note {{ font-size: 0.875rem; color: #94a3b8; margin-top: 20px; line-height: 1.5; border-top: 1px solid #334155; padding-top: 16px; }}
+        code {{ background: #334155; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #f1f5f9; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔴 DRS Bot</h1>
+        <div>
+            <span class="status {status_class}">
+                ● {bot_status}
+            </span>
+        </div>
+        <div class="info-group">
+            <div class="label">Bot User</div>
+            <div class="value">{bot_user}</div>
+        </div>
+        <div class="info-group">
+            <div class="label">Guilds Connected</div>
+            <div class="value">{len(bot.guilds) if is_ready else 0}</div>
+        </div>
+        <div class="note">
+            DRS Bot server is active on port {config.PORT}. To connect to Discord, set your <code>DISCORD_BOT_TOKEN</code> in the environment variables / settings menu.
+        </div>
+    </div>
+</body>
+</html>"""
+        return web.Response(text=html, content_type='text/html')
+
+    app = web.Application()
+    app.add_routes(routes)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', config.PORT)
+    await site.start()
+    logger.info(f"Web server started successfully on port {config.PORT}")
+
+
+async def main():
     bot = DRSBot()
-    bot.run(config.BOT_TOKEN)
+    await start_web_server(bot)
+    
+    token = config.BOT_TOKEN
+    if token:
+        try:
+            logger.info("Connecting to Discord...")
+            await bot.start(token)
+        except Exception as e:
+            logger.error(f"Error starting Discord bot: {e}")
+            while True:
+                await asyncio.sleep(3600)
+    else:
+        logger.warning("DISCORD_BOT_TOKEN environment variable not set. Web server active on port 3000.")
+        while True:
+            await asyncio.sleep(3600)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
 
