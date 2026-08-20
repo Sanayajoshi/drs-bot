@@ -2,26 +2,22 @@
 feedback_cog.py — Post-match feedback and structured issue reports.
 
 Flow:
-  1. Bot sends feedback message in match thread after FEEDBACK_DELAY_MINS.
+  1. Feedback prompt sent to match threads (scheduled / loop recovery across restarts).
   2. ✅ Good Run  → ephemeral thanks, saved to DB.
-  3. ⚠️ Report    → Modal opens with:
-                     - Select: which player?   (ui.Label + ui.Select)
-                     - Select: what issue?     (ui.Label + ui.Select)
-                     - TextInput: optional comment
-  4. Submit       → saved to feedback_reports, mod alert if applicable.
-
-Mod alerts fire for: Behavior, Performance, Other (not No Show).
-One submission per participant per match. Ephemeral throughout.
+  3. ⚠️ Report    → Modal opens to select reported player, issue type, and comment.
+  4. Negative report creates linked officer investigation threads in all involved servers' officer channels.
+  5. Messages in officer investigation threads are relayed cross-server.
+  6. Officers can click "Resolve & Close" to archive linked threads across servers.
 """
 
 import logging
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import ui
 from services.i18n import get as t
+import config
 
 logger = logging.getLogger("feedback_cog")
-
 
 # ---------------------------------------------------------------------------
 # Issue config
@@ -34,7 +30,6 @@ ISSUE_LABELS = {
     "other":       "Other ❓",
 }
 
-# All issue types generate mod alerts so officers are notified immediately
 ALERT_ISSUE_TYPES = {"no_show", "behavior", "performance", "other"}
 
 
@@ -59,8 +54,19 @@ def build_feedback_view(match_id: int) -> discord.ui.View:
     return view
 
 
+def build_resolve_view(report_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(discord.ui.Button(
+        label="Resolve & Close Investigation 🔒",
+        style=discord.ButtonStyle.secondary,
+        custom_id=f"fb_resolve_{report_id}",
+        row=0,
+    ))
+    return view
+
+
 # ---------------------------------------------------------------------------
-# Report modal — uses ui.Label + ui.Select pattern (same as reference code)
+# Report modal
 # ---------------------------------------------------------------------------
 
 class ReportModal(ui.Modal):
@@ -142,12 +148,33 @@ class ReportModal(ui.Modal):
                 await interaction.response.send_message("❌ Internal error.", ephemeral=True)
 
         except Exception as e:
-            import traceback; traceback.print_exc()
+            logger.error(f"ReportModal on_submit failed: {e}", exc_info=True)
             await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
         logger.error(f"ReportModal error: {error}", exc_info=True)
         await interaction.response.send_message("❌ Something went wrong. Try again.", ephemeral=True)
+
+
+class ResolveModal(ui.Modal, title="Resolve Incident"):
+    notes = ui.TextInput(
+        label="Resolution Notes (optional)",
+        placeholder="How was this incident resolved?",
+        required=False,
+        max_length=400,
+        style=discord.TextStyle.paragraph,
+    )
+
+    def __init__(self, report_id: int):
+        super().__init__()
+        self.report_id = report_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cog = interaction.client.cogs.get("FeedbackCog")
+        if cog:
+            await cog._resolve_report_action(interaction, self.report_id, self.notes.value.strip() or "No notes provided.")
+        else:
+            await interaction.response.send_message("❌ Internal error.", ephemeral=True)
 
 
 # ---------------------------------------------------------------------------
@@ -157,23 +184,61 @@ class ReportModal(ui.Modal):
 class FeedbackCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.feedback_recovery_loop.start()
+
+    def cog_unload(self):
+        self.feedback_recovery_loop.cancel()
 
     def _lang(self, guild_id: int) -> str:
         server = self.bot.db.get_server(guild_id)
         return server.get("language", "en") if server else "en"
 
     # ------------------------------------------------------------------
-    # Dispatch listener — called by thread_cog after FEEDBACK_DELAY_MINS
+    # Periodic check to ensure feedback is sent even after bot restarts
+    # ------------------------------------------------------------------
+
+    @tasks.loop(minutes=1.0)
+    async def feedback_recovery_loop(self):
+        try:
+            pending_matches = self.bot.db.get_pending_feedback_matches(config.FEEDBACK_DELAY_MINS)
+            for m in pending_matches:
+                match_id = m["id"]
+                logger.info(f"Feedback loop: dispatching feedback prompt for Match #{match_id}")
+                await self.send_match_feedback_prompt(match_id)
+        except Exception as e:
+            logger.error(f"Error in feedback_recovery_loop: {e}")
+
+    @feedback_recovery_loop.before_loop
+    async def before_feedback_recovery(self):
+        await self.bot.wait_until_ready()
+
+    # ------------------------------------------------------------------
+    # Dispatch listener
     # ------------------------------------------------------------------
 
     @commands.Cog.listener()
-    async def on_drs_send_feedback(self, match_id: int, threads: list[dict]):
+    async def on_drs_send_feedback(self, match_id: int, threads: list[dict] = None):
+        await self.send_match_feedback_prompt(match_id, threads)
+
+    async def send_match_feedback_prompt(self, match_id: int, threads: list[dict] = None):
+        """Sends feedback prompt to all active match threads and marks DB."""
+        if not threads:
+            db_threads = self.bot.db.get_match_threads(match_id)
+            threads = [{"guild_id": t["guild_id"], "thread_id": t["thread_id"], "lang": self._lang(t["guild_id"])} for t in db_threads]
+
+        if not threads:
+            self.bot.db.mark_match_feedback_sent(match_id)
+            return
+
+        self.bot.db.mark_match_feedback_sent(match_id)
+        view = build_feedback_view(match_id)
+
         for thread_info in threads:
-            lang = thread_info.get("lang", "en")
-            view = build_feedback_view(match_id)
+            lang = thread_info.get("lang") or self._lang(thread_info.get("guild_id", 0))
             try:
                 thread = await self.bot.fetch_channel(thread_info["thread_id"])
-                await thread.send(t(lang, "feedback_prompt"), view=view)
+                if isinstance(thread, discord.Thread) and not thread.archived:
+                    await thread.send(t(lang, "feedback_prompt"), view=view)
             except discord.NotFound:
                 pass
             except Exception as e:
@@ -196,6 +261,10 @@ class FeedbackCog(commands.Cog):
         elif custom_id.startswith("fb_report_"):
             match_id = int(custom_id.split("_")[-1])
             await self._handle_report(interaction, match_id)
+
+        elif custom_id.startswith("fb_resolve_"):
+            report_id = int(custom_id.split("_")[-1])
+            await self._handle_resolve_button(interaction, report_id)
 
     # ------------------------------------------------------------------
     # ✅ Good run
@@ -277,7 +346,7 @@ class FeedbackCog(commands.Cog):
         self.bot.db.save_feedback(match_id, interaction.user.id, was_positive=False)
 
         # Save structured report
-        saved = self.bot.db.save_feedback_report(
+        report_id = self.bot.db.save_feedback_report(
             match_id           = match_id,
             reporter_id        = interaction.user.id,
             reported_player_id = reported_id,
@@ -285,7 +354,7 @@ class FeedbackCog(commands.Cog):
             comment            = comment,
             thread_id          = thread_id,
         )
-        if not saved:
+        if not report_id:
             await interaction.response.send_message(t(lang, "feedback_error"), ephemeral=True)
             return
 
@@ -295,51 +364,48 @@ class FeedbackCog(commands.Cog):
         )
 
         if issue_type in ALERT_ISSUE_TYPES:
-            await self._send_officer_alert(
-                interaction   = interaction,
+            await self._create_officer_investigation_threads(
+                report_id     = report_id,
                 match_id      = match_id,
+                reporter_id   = interaction.user.id,
+                reporter_name = interaction.user.display_name,
                 reported_id   = reported_id,
                 reported_name = reported_name,
                 issue_type    = issue_type,
                 comment       = comment,
                 thread_id     = thread_id,
+                reporter_guild_id = interaction.guild_id,
             )
 
     # ------------------------------------------------------------------
-    # Officer alert (Broadcasts to all involved servers)
+    # Officer investigation thread creation across all involved servers
     # ------------------------------------------------------------------
 
-    async def _send_officer_alert(
+    async def _create_officer_investigation_threads(
         self,
-        interaction: discord.Interaction,
+        report_id: int,
         match_id: int,
+        reporter_id: int,
+        reporter_name: str,
         reported_id: int,
         reported_name: str,
         issue_type: str,
         comment: str | None,
         thread_id: int | None,
+        reporter_guild_id: int | None,
     ):
-        # Fetch participants to find which home guilds are represented in this run
         participants = self.bot.db.get_match_participants(match_id)
-        if not participants:
-            return
-
-        # Gather unique guild IDs represented by the players
         involved_guild_ids = {p["queue_guild_id"] for p in participants if p.get("queue_guild_id")}
+        if reporter_guild_id:
+            involved_guild_ids.add(reporter_guild_id)
 
-        # Always include the guild where the report was actually filed
-        if interaction.guild_id:
-            involved_guild_ids.add(interaction.guild_id)
-
-        # Retrieve match specifications
-        match_info  = self.bot.db._execute(
-            "SELECT drs_level FROM matches WHERE id = ?", (match_id,), fetch_one=True
-        )
-        drs_level   = match_info["drs_level"] if match_info else "?"
+        match_info = self.bot.db._execute("SELECT drs_level FROM matches WHERE id = ?", (match_id,), fetch_one=True)
+        drs_level = match_info["drs_level"] if match_info else "?"
         issue_label = ISSUE_LABELS.get(issue_type, issue_type)
-        thread_ref  = f"<#{thread_id}>" if thread_id else "*(no thread)*"
+        thread_ref = f"<#{thread_id}>" if thread_id else "*(no thread)*"
 
-        # Broadcast the alert to each involved guild's officer channel
+        thread_name = f"🚨-report-{report_id}-m{match_id}-{issue_type[:8]}"
+
         for guild_id in involved_guild_ids:
             server = self.bot.db.get_server(guild_id)
             if not server or not server.get("officer_channel_id"):
@@ -357,28 +423,91 @@ class FeedbackCog(commands.Cog):
 
             lang = server.get("language", "en")
 
-            # Construct localized alert embed
             embed = discord.Embed(
-                title       = t(lang, "officer_alert_title"),
-                color       = discord.Color.red(),
-                description = f"A pilot filed a report for **Match #{match_id}** (DRS{drs_level}).",
+                title=f"🚨 Officer Investigation — Match #{match_id} (DRS{drs_level})",
+                color=discord.Color.red(),
+                description=(
+                    f"A negative report was filed for **Match #{match_id}**.\n"
+                    f"💬 *Messages sent in this thread are automatically relayed to officer channels in all participating servers.*"
+                ),
             )
-            embed.add_field(name="Reported Player", value=f"**{reported_name}** (<@{reported_id}>)",                     inline=True)
-            embed.add_field(name="Reported By",     value=f"{interaction.user.display_name} (<@{interaction.user.id}>)", inline=True)
-            embed.add_field(name="Issue",           value=issue_label,                                                   inline=True)
-            embed.add_field(name="Thread",          value=thread_ref,                                                    inline=True)
-            embed.add_field(name="Match ID",        value=str(match_id),                                                 inline=True)
+            embed.add_field(name="Reported Player", value=f"**{reported_name}** (<@{reported_id}>)", inline=True)
+            embed.add_field(name="Reported By", value=f"{reporter_name} (<@{reporter_id}>)", inline=True)
+            embed.add_field(name="Issue", value=issue_label, inline=True)
+            embed.add_field(name="Original Thread", value=thread_ref, inline=True)
+            embed.add_field(name="Report ID", value=f"#{report_id}", inline=True)
 
             if comment:
                 embed.add_field(name="Comment", value=comment[:1024], inline=False)
 
+            view = build_resolve_view(report_id)
+
             try:
-                await channel.send(embed=embed)
+                # Create thread in the officer channel
+                thread = await channel.create_thread(
+                    name=thread_name,
+                    type=discord.ChannelType.public_thread,
+                    auto_archive_duration=1440,
+                )
+                await thread.send(embed=embed, view=view)
+                self.bot.db.save_report_thread(report_id, match_id, guild_id, channel.id, thread.id)
+                logger.info(f"Created officer report thread {thread.id} in guild {guild_id} for report #{report_id}")
             except discord.Forbidden:
-                pass
+                logger.warning(f"Forbidden to create officer report thread in guild {guild_id}")
             except Exception as e:
-                logger.error(f"Failed to send officer alert to guild {guild_id}: {e}")
+                logger.error(f"Failed to create officer thread in guild {guild_id}: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Resolution Handling
+    # ------------------------------------------------------------------
+
+    async def _handle_resolve_button(self, interaction: discord.Interaction, report_id: int):
+        # Check permissions
+        server = self.bot.db.get_server(interaction.guild_id) if interaction.guild_id else None
+        manager_role_id = server.get("manager_role_id") if server else None
+        is_admin = interaction.user.guild_permissions.administrator
+        is_manager = manager_role_id and any(r.id == manager_role_id for r in getattr(interaction.user, "roles", []))
+
+        if not (is_admin or is_manager):
+            await interaction.response.send_message("❌ Only officers/managers can resolve investigations.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(ResolveModal(report_id))
+
+    async def _resolve_report_action(self, interaction: discord.Interaction, report_id: int, notes: str):
+        report = self.bot.db.get_feedback_report(report_id)
+        if not report:
+            await interaction.response.send_message("❌ Report not found.", ephemeral=True)
+            return
+
+        self.bot.db.resolve_feedback_report(report_id, interaction.user.id, notes)
+        report_threads = self.bot.db.get_report_threads(report_id)
+
+        resolution_embed = discord.Embed(
+            title=f"🔒 Investigation Resolved — Report #{report_id}",
+            description=(
+                f"Resolved by **{interaction.user.display_name}** (<@{interaction.user.id}>) "
+                f"from **{interaction.guild.name if interaction.guild else 'Unknown'}**.\n\n"
+                f"**Resolution Notes:**\n{notes}\n\n"
+                f"*This thread and linked officer threads are now archived.*"
+            ),
+            color=discord.Color.green(),
+        )
+
+        await interaction.response.send_message("✅ Investigation resolved. Archiving threads...", ephemeral=True)
+
+        for t_info in report_threads:
+            try:
+                thread = await self.bot.fetch_channel(t_info["thread_id"])
+                if isinstance(thread, discord.Thread) and not thread.archived:
+                    await thread.send(embed=resolution_embed)
+                    await thread.edit(archived=True, locked=True)
+            except Exception as e:
+                logger.error(f"Failed to archive report thread {t_info['thread_id']}: {e}")
+
+        self.bot.db.close_report_threads(report_id)
 
 
 async def setup(bot):
     await bot.add_cog(FeedbackCog(bot))
+

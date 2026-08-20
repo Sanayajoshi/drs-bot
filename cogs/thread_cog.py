@@ -344,7 +344,7 @@ class ThreadCog(commands.Cog):
                 logger.error(f"Archive failed for thread {thread_info['thread_id']}: {e}")
 
     # ------------------------------------------------------------------
-    # Message relay between servers
+    # Message relay between servers (for both match threads and officer report threads)
     # Format: author = "PlayerName[CorpName]", footer = original text
     # ------------------------------------------------------------------
 
@@ -354,10 +354,20 @@ class ThreadCog(commands.Cog):
             return
         if not isinstance(message.channel, discord.Thread):
             return
+
+        # Check if match thread
         match_id = self.bot.db.get_match_id_by_thread(message.channel.id)
-        if not match_id:
+        if match_id:
+            await self._relay_match_message(message, match_id)
             return
 
+        # Check if officer report thread
+        report_id = self.bot.db.get_report_id_by_thread(message.channel.id)
+        if report_id:
+            await self._relay_report_message(message, report_id)
+            return
+
+    async def _relay_match_message(self, message: discord.Message, match_id: int):
         source_guild_id = message.guild.id
         source_server   = self.bot.db.get_server(source_guild_id)
         source_lang     = source_server.get("language", "en") if source_server else "en"
@@ -399,6 +409,45 @@ class ThreadCog(commands.Cog):
             except Exception as e:
                 logger.error(f"Relay failed to thread {thread_info['thread_id']}: {e}", exc_info=True)
 
+    async def _relay_report_message(self, message: discord.Message, report_id: int):
+        source_guild_id = message.guild.id
+        source_server   = self.bot.db.get_server(source_guild_id)
+        source_lang     = source_server.get("language", "en") if source_server else "en"
+
+        source_guild = self.bot.get_guild(source_guild_id)
+        corp_name    = source_guild.name if source_guild else "Unknown"
+        author_label = f"🛡️ {message.author.display_name} [{corp_name}]"
+
+        all_threads = self.bot.db.get_report_threads(report_id)
+
+        for thread_info in all_threads:
+            if thread_info["guild_id"] == source_guild_id or thread_info.get("closed_at"):
+                continue
+
+            target_server = self.bot.db.get_server(thread_info["guild_id"])
+            target_lang   = target_server.get("language", "en") if target_server else "en"
+
+            content = message.content
+
+            if source_lang != target_lang:
+                translated = await self.thread_service.translate(content, source_lang, target_lang)
+                embed = discord.Embed(description=translated, color=discord.Color.red())
+                embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+                if translated != content:
+                    footer_text = content[:200] + ("…" if len(content) > 200 else "")
+                    embed.set_footer(text=f"Original: {footer_text}")
+            else:
+                embed = discord.Embed(description=content, color=discord.Color.red())
+                embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+
+            try:
+                target_thread = await self.bot.fetch_channel(thread_info["thread_id"])
+                await target_thread.send(embed=embed)
+            except discord.NotFound:
+                pass
+            except Exception as e:
+                logger.error(f"Report relay failed to thread {thread_info['thread_id']}: {e}", exc_info=True)
+
     # ------------------------------------------------------------------
     # Feedback scheduler
     # ------------------------------------------------------------------
@@ -410,5 +459,6 @@ class ThreadCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ThreadCog(bot))
+
 
 

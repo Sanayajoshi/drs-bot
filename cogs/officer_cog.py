@@ -286,6 +286,53 @@ class OfficerCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------
+    # /officer trigger_feedback <match_id> (Testing / manual trigger)
+    # ------------------------------------------------------------------
+
+    @drs.command(name="trigger_feedback", description="Immediately trigger the feedback prompt for a match (for testing)")
+    @app_commands.describe(match_id="The match ID to trigger feedback for")
+    async def trigger_feedback(self, interaction: discord.Interaction, match_id: int):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+
+        match_row = self.bot.db._execute("SELECT id FROM matches WHERE id = ?", (match_id,), fetch_one=True)
+        if not match_row:
+            await interaction.response.send_message(f"❌ Match #{match_id} not found.", ephemeral=True)
+            return
+
+        feedback_cog = self.bot.get_cog("FeedbackCog")
+        if not feedback_cog:
+            await interaction.response.send_message("❌ FeedbackCog not loaded.", ephemeral=True)
+            return
+
+        await feedback_cog.send_match_feedback_prompt(match_id)
+        await interaction.response.send_message(f"✅ Feedback prompt dispatched for **Match #{match_id}**.", ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # /officer resolve_report <report_id> [notes]
+    # ------------------------------------------------------------------
+
+    @drs.command(name="resolve_report", description="Resolve and close an officer incident report investigation")
+    @app_commands.describe(report_id="The ID of the report to resolve", notes="Optional resolution notes")
+    async def resolve_report(self, interaction: discord.Interaction, report_id: int, notes: str = None):
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message("❌ Officer access only.", ephemeral=True)
+            return
+
+        report = self.bot.db.get_feedback_report(report_id)
+        if not report:
+            await interaction.response.send_message(f"❌ Report #{report_id} not found.", ephemeral=True)
+            return
+
+        feedback_cog = self.bot.get_cog("FeedbackCog")
+        if not feedback_cog:
+            await interaction.response.send_message("❌ FeedbackCog not loaded.", ephemeral=True)
+            return
+
+        await feedback_cog._resolve_report_action(interaction, report_id, notes or "Resolved by officer command.")
+
+    # ------------------------------------------------------------------
     # /officer level
     # ------------------------------------------------------------------
 
@@ -691,3 +738,4 @@ class OfficerCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(OfficerCog(bot))
+

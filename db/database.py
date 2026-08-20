@@ -138,10 +138,26 @@ class DatabaseOperations:
                 issue_type         TEXT NOT NULL,
                 comment            TEXT,
                 thread_id          INTEGER,
-                created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+                resolved_at        TEXT,
+                resolved_by        INTEGER,
+                resolution_notes   TEXT
             )""",
             "CREATE INDEX IF NOT EXISTS idx_fr_match    ON feedback_reports(match_id)",
             "CREATE INDEX IF NOT EXISTS idx_fr_reported ON feedback_reports(reported_player_id)",
+            """CREATE TABLE IF NOT EXISTS report_threads (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id  INTEGER NOT NULL REFERENCES feedback_reports(id) ON DELETE CASCADE,
+                match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+                guild_id   INTEGER NOT NULL REFERENCES servers(guild_id) ON DELETE CASCADE,
+                channel_id INTEGER NOT NULL,
+                thread_id  INTEGER NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                closed_at  TEXT,
+                UNIQUE (report_id, guild_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_rt_report ON report_threads(report_id)",
+            "CREATE INDEX IF NOT EXISTS idx_rt_thread ON report_threads(thread_id)",
             # Corp bonuses — one active bonus per guild at a time
             """CREATE TABLE IF NOT EXISTS corp_bonuses (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -195,9 +211,29 @@ class DatabaseOperations:
                 issue_type         TEXT NOT NULL,
                 comment            TEXT,
                 thread_id          INTEGER,
-                created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+                resolved_at        TEXT,
+                resolved_by        INTEGER,
+                resolution_notes   TEXT
             )""",
             "CREATE INDEX IF NOT EXISTS idx_fr_match    ON feedback_reports(match_id)",
+            "ALTER TABLE matches ADD COLUMN feedback_sent_at TEXT",
+            "ALTER TABLE feedback_reports ADD COLUMN resolved_at TEXT",
+            "ALTER TABLE feedback_reports ADD COLUMN resolved_by INTEGER",
+            "ALTER TABLE feedback_reports ADD COLUMN resolution_notes TEXT",
+            """CREATE TABLE IF NOT EXISTS report_threads (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id  INTEGER NOT NULL REFERENCES feedback_reports(id) ON DELETE CASCADE,
+                match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+                guild_id   INTEGER NOT NULL REFERENCES servers(guild_id) ON DELETE CASCADE,
+                channel_id INTEGER NOT NULL,
+                thread_id  INTEGER NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                closed_at  TEXT,
+                UNIQUE (report_id, guild_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_rt_report ON report_threads(report_id)",
+            "CREATE INDEX IF NOT EXISTS idx_rt_thread ON report_threads(thread_id)",
             "CREATE INDEX IF NOT EXISTS idx_fr_reported ON feedback_reports(reported_player_id)",
             # corp_bonuses
             """CREATE TABLE IF NOT EXISTS corp_bonuses (
@@ -750,12 +786,89 @@ class DatabaseOperations:
         issue_type: str,
         comment: str | None,
         thread_id: int | None,
-    ) -> bool:
+    ) -> int | None:
+        if not self.connection:
+            return None
+        try:
+            with self.connection:
+                cur = self.connection.execute(
+                    """INSERT INTO feedback_reports
+                       (match_id, reporter_id, reported_player_id, issue_type, comment, thread_id)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (match_id, reporter_id, reported_player_id, issue_type, comment or None, thread_id)
+                )
+                return cur.lastrowid
+        except Exception as e:
+            self.logger.error(f"save_feedback_report failed: {e}")
+            return None
+
+    def mark_match_feedback_sent(self, match_id: int) -> bool:
         return self._execute(
-            """INSERT INTO feedback_reports
-               (match_id, reporter_id, reported_player_id, issue_type, comment, thread_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (match_id, reporter_id, reported_player_id, issue_type, comment or None, thread_id)
+            "UPDATE matches SET feedback_sent_at = datetime('now') WHERE id = ?",
+            (match_id,)
+        ) is not None
+
+    def get_pending_feedback_matches(self, delay_minutes: int) -> list[dict]:
+        rows = self._execute(
+            f"""SELECT id, drs_level, created_at FROM matches
+                WHERE feedback_sent_at IS NULL
+                AND datetime(created_at, '+{int(delay_minutes)} minutes') <= datetime('now')""",
+            fetch_all=True
+        )
+        return [{"id": r["id"], "drs_level": r["drs_level"], "created_at": r["created_at"]} for r in rows] if rows else []
+
+    def get_feedback_report(self, report_id: int) -> dict | None:
+        row = self._execute(
+            """SELECT fr.*, ur.display_name AS reporter_name, up.display_name AS reported_name
+               FROM feedback_reports fr
+               JOIN users ur ON ur.discord_id = fr.reporter_id
+               JOIN users up ON up.discord_id = fr.reported_player_id
+               WHERE fr.id = ?""",
+            (report_id,), fetch_one=True
+        )
+        return dict(row) if row else None
+
+    def resolve_feedback_report(self, report_id: int, resolved_by: int, resolution_notes: str = "") -> bool:
+        return self._execute(
+            """UPDATE feedback_reports
+               SET resolved_at = datetime('now'), resolved_by = ?, resolution_notes = ?
+               WHERE id = ?""",
+            (resolved_by, resolution_notes, report_id)
+        ) is not None
+
+    # ------------------------------------------------------------------ report_threads
+
+    def save_report_thread(self, report_id: int, match_id: int, guild_id: int, channel_id: int, thread_id: int) -> bool:
+        return self._execute(
+            """INSERT INTO report_threads (report_id, match_id, guild_id, channel_id, thread_id)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(report_id, guild_id) DO UPDATE SET thread_id = excluded.thread_id, closed_at = NULL""",
+            (report_id, match_id, guild_id, channel_id, thread_id)
+        ) is not None
+
+    def get_report_threads(self, report_id: int) -> list[dict]:
+        return self._execute(
+            "SELECT guild_id, channel_id, thread_id, closed_at FROM report_threads WHERE report_id = ?",
+            (report_id,), fetch_all=True
+        ) or []
+
+    def get_all_active_report_threads(self) -> list[dict]:
+        return self._execute(
+            "SELECT report_id, guild_id, thread_id FROM report_threads WHERE closed_at IS NULL",
+            fetch_all=True
+        ) or []
+
+    def get_report_id_by_thread(self, thread_id: int) -> int | None:
+        row = self._execute(
+            "SELECT report_id FROM report_threads WHERE thread_id = ? AND closed_at IS NULL",
+            (thread_id,), fetch_one=True
+        )
+        return row["report_id"] if row else None
+
+    def close_report_threads(self, report_id: int) -> bool:
+        return self._execute(
+            "UPDATE report_threads SET closed_at = datetime('now') WHERE report_id = ?",
+            (report_id,)
         ) is not None
 
     def get_feedback_reports_for_match(self, match_id: int) -> list[dict]:
@@ -976,6 +1089,7 @@ class DatabaseOperations:
         pos = row_pos["cnt"] if row_pos else 0
         pct = round((pos / total * 100), 1) if total > 0 else 100.0
         return {"positive": pos, "total": total, "percentage": pct}
+
 
 
 
