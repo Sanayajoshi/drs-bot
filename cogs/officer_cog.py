@@ -272,12 +272,72 @@ class OfficerCog(commands.Cog):
             embed.add_field(name="Ratings", value="\n".join(fb_lines), inline=False)
 
         if reports:
-            rpt_lines = []
+            rpt_blocks = []
             for r in reports:
-                issue = r['issue_type'].replace('_', ' ').title()
-                cmt = f" — *\"{r['comment']}\"*" if r.get('comment') else ""
-                rpt_lines.append(f"⚠️ **{issue}**: {r['reporter_name']} reported **{r['reported_name']}**{cmt}")
-            embed.add_field(name="Reports & Issues", value="\n".join(rpt_lines), inline=False)
+                issue_raw = r.get("issue_type", "other")
+                issue_map = {
+                    "no_show": "No Show 👻",
+                    "behavior": "Behavior 🚨",
+                    "performance": "Performance 📉",
+                    "other": "Other ❓",
+                }
+                issue = issue_map.get(issue_raw, issue_raw.replace("_", " ").title())
+
+                created_ts_str = ""
+                if r.get("created_at"):
+                    try:
+                        dt = datetime.strptime(str(r["created_at"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        ts = int(dt.timestamp())
+                        created_ts_str = f" · <t:{ts}:R>"
+                    except Exception:
+                        pass
+
+                lines = [
+                    f"🎫 **Ticket #{r['id']}** — **{issue}**{created_ts_str}",
+                    f"   • **Reported Player:** **{r['reported_name']}** (<@{r['reported_player_id']}>)",
+                    f"   • **Filed By:** {r['reporter_name']} (<@{r['reporter_id']}>)"
+                ]
+
+                if r.get("comment"):
+                    lines.append(f"   • **Reason / Comment:** *\"{r['comment']}\"*")
+
+                # Check resolution / closure status
+                if r.get("resolved_at"):
+                    res_ts_str = r["resolved_at"]
+                    try:
+                        res_dt = datetime.strptime(str(r["resolved_at"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        res_ts = int(res_dt.timestamp())
+                        res_ts_str = f"<t:{res_ts}:f> (<t:{res_ts}:R>)"
+                    except Exception:
+                        pass
+
+                    resolver_label = r.get("resolver_name")
+                    resolver_id = r.get("resolved_by")
+                    if resolver_label and resolver_id:
+                        resolver_str = f"**{resolver_label}** (<@{resolver_id}>)"
+                    elif resolver_id:
+                        resolver_str = f"<@{resolver_id}>"
+                    else:
+                        resolver_str = "Officer"
+
+                    lines.append(f"   • **Status:** 🟢 **Resolved / Closed**")
+                    lines.append(f"   • **Resolved By:** {resolver_str}")
+                    lines.append(f"   • **Resolved At:** {res_ts_str}")
+
+                    if r.get("resolution_notes"):
+                        lines.append(f"   • **Resolution Notes:** {r['resolution_notes']}")
+                else:
+                    lines.append(f"   • **Status:** 🔴 **Open Investigation / Unresolved**")
+
+                # Associated officer investigation threads
+                r_threads = self.bot.db.get_report_threads(r["id"])
+                if r_threads:
+                    t_refs = [f"<#{t['thread_id']}>" for t in r_threads]
+                    lines.append(f"   • **Investigation Threads:** {' '.join(t_refs)}")
+
+                rpt_blocks.append("\n".join(lines))
+
+            embed.add_field(name=f"⚠️ Reports & Tickets ({len(reports)})", value="\n\n".join(rpt_blocks), inline=False)
 
         if threads:
             thread_refs = [f"<#{t['thread_id']}>" for t in threads]
@@ -738,4 +798,5 @@ class OfficerCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(OfficerCog(bot))
+
 

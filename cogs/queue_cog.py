@@ -12,13 +12,13 @@ logger = logging.getLogger("queue_cog")
 EXPIRY_WARN_MINS = 5
 
 
-def _build_expiry_extend_view(discord_id: int, drs_level: int, lang: str) -> discord.ui.View:
+def _build_expiry_extend_view(discord_id: int, drs_level: int, queue_type: str = "DRS", lang: str = "en") -> discord.ui.View:
     """Button only the warned player can use to add 30 min."""
-    view = discord.ui.View(timeout=None)
+    view = discord.ui.View(timeout=300)
     view.add_item(discord.ui.Button(
         label=t(lang, "expiry_extend_prompt"),
         style=discord.ButtonStyle.success,
-        custom_id=f"expiry_extend_{discord_id}_{drs_level}",
+        custom_id=f"expiry_extend_{discord_id}_{drs_level}_{queue_type}",
         emoji="⏳",
     ))
     return view
@@ -29,8 +29,8 @@ class QueueCog(commands.Cog):
         self.bot = bot
         self.queue_service = QueueService(bot.db)
         self.queue_service.set_dispatch(bot.dispatch)
-        # Track which (discord_id, drs_level) combos have already been warned
-        self._warned: set[tuple[int, int]] = set()
+        # Track which (discord_id, drs_level, queue_type) combos have already been warned
+        self._warned: set[tuple] = set()
         self.expiry_loop.start()
         self.sync_loop.start()
 
@@ -63,7 +63,8 @@ class QueueCog(commands.Cog):
             return
         full_server = self.bot.db.get_server(guild_id)
         lang  = full_server.get("language", "en") if full_server else "en"
-        embeds = build_queue_embeds(self.bot.db.get_full_queue(), lang)
+        activity_stats = self.bot.db.get_global_24h_match_stats()
+        embeds = build_queue_embeds(self.bot.db.get_full_queue(), lang, activity_stats=activity_stats)
         view  = build_queue_view()
         if message_id:
             try:
@@ -81,6 +82,7 @@ class QueueCog(commands.Cog):
 
     async def _push_queue_update(self):
         queue_data = self.bot.db.get_full_queue()
+        activity_stats = self.bot.db.get_global_24h_match_stats()
         view = build_queue_view()
         for server in self.bot.db.get_all_servers():
             try:
@@ -90,7 +92,7 @@ class QueueCog(commands.Cog):
                     continue
                 full_server = self.bot.db.get_server(server["guild_id"])
                 lang  = full_server.get("language", "en") if full_server else "en"
-                embeds = build_queue_embeds(queue_data, lang)
+                embeds = build_queue_embeds(queue_data, lang, activity_stats=activity_stats)
                 msg = await channel.fetch_message(server["queue_message_id"])
                 await msg.edit(embeds=embeds, view=view)
             except discord.NotFound:
@@ -180,6 +182,68 @@ class QueueCog(commands.Cog):
             except Exception as e:
                 logger.error(f"notify_quickstart failed for guild {guild_id}: {e}")
 
+    async def _notify_extended(self, display_name: str, level_str: str, target_guild_id: int = None):
+        guilds = [target_guild_id] if target_guild_id else [s["guild_id"] for s in self.bot.db.get_all_servers()]
+        for guild_id in guilds:
+            if not guild_id:
+                continue
+            full_srv = self.bot.db.get_server(guild_id)
+            if not full_srv or not full_srv.get("notification_channel_id"):
+                continue
+            guild   = self.bot.get_guild(guild_id)
+            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            if not channel:
+                continue
+            try:
+                await channel.send(f"⏳ **{display_name}** extended their **{level_str}** slot by 30 minutes.")
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                logger.error(f"notify_extended failed for guild {guild_id}: {e}")
+
+    async def _notify_expiry_warning(self, discord_id: int, display_name: str, drs_level: int, queue_type: str = "DRS", target_guild_id: int = None):
+        guilds = [target_guild_id] if target_guild_id else [s["guild_id"] for s in self.bot.db.get_all_servers()]
+        for guild_id in guilds:
+            if not guild_id:
+                continue
+            full_srv = self.bot.db.get_server(guild_id)
+            if not full_srv or not full_srv.get("notification_channel_id"):
+                continue
+            guild   = self.bot.get_guild(guild_id)
+            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            if not channel:
+                continue
+
+            lang = full_srv.get("language", "en")
+            view = _build_expiry_extend_view(discord_id, drs_level, queue_type, lang)
+            content = f"⏰ <@{discord_id}> (**{display_name}**) — your **{queue_type}{drs_level}** queue slot expires in ~5 minutes! Tap ⏳ below to add 30 more."
+            try:
+                await channel.send(content, view=view)
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                logger.error(f"notify_expiry_warning failed for guild {guild_id}: {e}")
+
+    async def _notify_expired(self, discord_id: int, display_name: str, drs_level: int, queue_type: str = "DRS", target_guild_id: int = None):
+        guilds = [target_guild_id] if target_guild_id else [s["guild_id"] for s in self.bot.db.get_all_servers()]
+        for guild_id in guilds:
+            if not guild_id:
+                continue
+            full_srv = self.bot.db.get_server(guild_id)
+            if not full_srv or not full_srv.get("notification_channel_id"):
+                continue
+            guild   = self.bot.get_guild(guild_id)
+            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            if not channel:
+                continue
+            content = f"⏰ <@{discord_id}> (**{display_name}**) — your spot in **{queue_type}{drs_level}** has expired. Tap a number on the queue message to jump back in!"
+            try:
+                await channel.send(content)
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                logger.error(f"notify_expired failed for guild {guild_id}: {e}")
+
     # ------------------------------------------------------------------
     # Match Formation Listener
     # ------------------------------------------------------------------
@@ -244,6 +308,8 @@ class QueueCog(commands.Cog):
             await self._handle_mode_switch(interaction)
         elif custom_id == "drs_leave":
             await self._handle_leave(interaction)
+        elif custom_id == "drs_extend":
+            await self._handle_extend_button(interaction)
         elif custom_id == "drs_quickstart":
             await self._handle_quickstart(interaction)
         elif custom_id == "drs_need_assist":
@@ -341,6 +407,71 @@ class QueueCog(commands.Cog):
         await self._push_queue_update()
 
     # ------------------------------------------------------------------
+    # Extend Active Queues (+30 min)
+    # ------------------------------------------------------------------
+
+    async def _handle_extend_button(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        discord_id   = interaction.user.id
+        display_name = interaction.user.display_name
+
+        user_queues = self.bot.db.get_user_queue_levels(discord_id)
+        if not user_queues:
+            await interaction.followup.send("🤔 You are not in any queue right now.", ephemeral=True)
+            return
+
+        self.bot.db.extend_queue(discord_id, minutes=config.EXTEND_MINS)
+        for q in user_queues:
+            self._warned.discard((discord_id, q["drs_level"], q.get("queue_type", "DRS")))
+            self._warned.discard((discord_id, q["drs_level"]))
+
+        q_names = ", ".join(f"{q.get('queue_type', 'DRS')}{q['drs_level']}" for q in user_queues)
+        await interaction.followup.send(
+            f"⏳ Added 30 minutes to your active queue slot(s) (**{q_names}**)!", ephemeral=True
+        )
+        await self._notify_extended(display_name, q_names, target_guild_id=interaction.guild_id)
+        await self._push_queue_update()
+
+    async def _handle_expiry_extend(self, interaction: discord.Interaction, custom_id: str):
+        parts = custom_id.split("_")
+        # Format: expiry_extend_{discord_id}_{drs_level}_{queue_type} or expiry_extend_{discord_id}_{drs_level}
+        if len(parts) < 4:
+            return
+        target_id = int(parts[2])
+        level = int(parts[3])
+        queue_type = parts[4] if len(parts) > 4 else "DRS"
+
+        if interaction.user.id != target_id:
+            await interaction.response.send_message("🤔 This extend button isn't for you.", ephemeral=True)
+            return
+
+        if not self.bot.db.is_user_queued_for_level(target_id, level, queue_type):
+            await interaction.response.send_message(
+                f"❌ Your slot in **{queue_type}{level}** has already expired or you left the queue.", ephemeral=True
+            )
+            try:
+                await interaction.message.edit(view=None)
+            except Exception:
+                pass
+            return
+
+        self.bot.db.extend_queue(target_id, minutes=config.EXTEND_MINS)
+        self._warned.discard((target_id, level, queue_type))
+        self._warned.discard((target_id, level))
+
+        await interaction.response.send_message(
+            f"✅ Added 30 minutes to your **{queue_type}{level}** queue!", ephemeral=True
+        )
+
+        try:
+            await interaction.message.edit(view=None)
+        except Exception:
+            pass
+
+        await self._notify_extended(interaction.user.display_name, f"{queue_type}{level}", target_guild_id=interaction.guild_id)
+        await self._push_queue_update()
+
+    # ------------------------------------------------------------------
     # Quick Start
     # ------------------------------------------------------------------
 
@@ -397,10 +528,44 @@ class QueueCog(commands.Cog):
     @tasks.loop(seconds=config.EXPIRY_INTERVAL_SECS)
     async def expiry_loop(self):
         try:
-            removed_ids = self.bot.db.remove_expired_entries()
-            if removed_ids:
-                logger.info(f"Expiry sweep removed entries for {len(removed_ids)} user(s)")
+            # 1. Sweep expired entries and notify players to join back in the origin server only
+            expired_entries = self.bot.db.remove_expired_entries()
+            if expired_entries:
+                logger.info(f"Expiry sweep removed {len(expired_entries)} expired queue entry(ies)")
+                for e in expired_entries:
+                    uid = e["discord_id"]
+                    lvl = e["drs_level"]
+                    q_type = e.get("queue_type", "DRS")
+                    d_name = e.get("display_name") or f"Pilot {uid}"
+                    q_guild = e.get("queue_guild_id")
+                    self._warned.discard((uid, lvl, q_type))
+                    self._warned.discard((uid, lvl))
+                    await self._notify_expired(uid, d_name, lvl, q_type, target_guild_id=q_guild)
                 await self._push_queue_update()
+
+            # 2. Check active entries for 5-minute expiry warnings in the origin server only
+            from datetime import datetime, timezone
+            now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+            full_q = self.bot.db.get_full_queue()
+            for entry in full_q:
+                exp_dt = entry.get("expires_at")
+                if not exp_dt:
+                    continue
+                if exp_dt.tzinfo is None:
+                    exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                remaining_secs = (exp_dt - now_utc).total_seconds()
+                uid = entry["discord_id"]
+                lvl = entry["drs_level"]
+                q_type = entry.get("queue_type", "DRS")
+                q_guild = entry.get("queue_guild_id")
+                warn_key = (uid, lvl, q_type)
+
+                if 0 < remaining_secs <= EXPIRY_WARN_MINS * 60:
+                    if warn_key not in self._warned and (uid, lvl) not in self._warned:
+                        self._warned.add(warn_key)
+                        self._warned.add((uid, lvl))
+                        await self._notify_expiry_warning(uid, entry["display_name"], lvl, q_type, target_guild_id=q_guild)
+
         except Exception as e:
             logger.error(f"Expiry loop error: {e}", exc_info=True)
 
@@ -426,6 +591,7 @@ class QueueCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(QueueCog(bot))
+
 
 
 

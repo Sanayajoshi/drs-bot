@@ -623,23 +623,25 @@ class DatabaseOperations:
                  "modt_level": r["modt_level"],
                  "need_assist": bool(r.get("need_assist", 0))} for r in rows]
 
-    def remove_expired_entries(self) -> list[int]:
+    def remove_expired_entries(self) -> list[dict]:
         if not self.connection:
             return []
         try:
             cur = self.connection.execute(
-                "SELECT discord_id, queue_type, drs_level, joined_at FROM queue_entries WHERE expires_at <= datetime('now')"
+                """SELECT qe.discord_id, qe.queue_type, qe.drs_level, qe.joined_at, qe.queue_guild_id, u.display_name
+                   FROM queue_entries qe
+                   LEFT JOIN users u ON u.discord_id = qe.discord_id
+                   WHERE qe.expires_at <= datetime('now')"""
             )
             expired = [dict(r) for r in cur.fetchall()]
-            ids = [r["discord_id"] for r in expired]
             for r in expired:
                 self.log_queue_wait(r["discord_id"], r.get("queue_type", "DRS"), r["drs_level"], r.get("joined_at"), "expired")
-            if ids:
+            if expired:
                 self.connection.execute(
                     "DELETE FROM queue_entries WHERE expires_at <= datetime('now')"
                 )
                 self.connection.commit()
-            return ids
+            return expired
         except Exception as e:
             self.logger.error(f"remove_expired_entries failed: {e}")
             return []
@@ -803,10 +805,18 @@ class DatabaseOperations:
             return None
 
     def mark_match_feedback_sent(self, match_id: int) -> bool:
-        return self._execute(
-            "UPDATE matches SET feedback_sent_at = datetime('now') WHERE id = ?",
-            (match_id,)
-        ) is not None
+        if not self.connection:
+            return False
+        try:
+            with self.connection:
+                cur = self.connection.execute(
+                    "UPDATE matches SET feedback_sent_at = datetime('now') WHERE id = ? AND feedback_sent_at IS NULL",
+                    (match_id,)
+                )
+                return cur.rowcount > 0
+        except Exception as e:
+            self.logger.error(f"mark_match_feedback_sent failed: {e}")
+            return False
 
     def get_pending_feedback_matches(self, delay_minutes: int) -> list[dict]:
         rows = self._execute(
@@ -819,10 +829,12 @@ class DatabaseOperations:
 
     def get_feedback_report(self, report_id: int) -> dict | None:
         row = self._execute(
-            """SELECT fr.*, ur.display_name AS reporter_name, up.display_name AS reported_name
+            """SELECT fr.*, ur.display_name AS reporter_name, up.display_name AS reported_name,
+                      ures.display_name AS resolver_name
                FROM feedback_reports fr
                JOIN users ur ON ur.discord_id = fr.reporter_id
                JOIN users up ON up.discord_id = fr.reported_player_id
+               LEFT JOIN users ures ON ures.discord_id = fr.resolved_by
                WHERE fr.id = ?""",
             (report_id,), fetch_one=True
         )
@@ -874,12 +886,15 @@ class DatabaseOperations:
     def get_feedback_reports_for_match(self, match_id: int) -> list[dict]:
         return self._execute(
             """SELECT fr.id, fr.issue_type, fr.comment, fr.thread_id, fr.created_at,
+                      fr.resolved_at, fr.resolved_by, fr.resolution_notes,
                       ur.display_name AS reporter_name,
                       up.display_name AS reported_name,
+                      ures.display_name AS resolver_name,
                       fr.reporter_id, fr.reported_player_id
                FROM feedback_reports fr
                JOIN users ur ON ur.discord_id = fr.reporter_id
                JOIN users up ON up.discord_id = fr.reported_player_id
+               LEFT JOIN users ures ON ures.discord_id = fr.resolved_by
                WHERE fr.match_id = ?
                ORDER BY fr.created_at ASC""",
             (match_id,), fetch_all=True
@@ -1089,6 +1104,27 @@ class DatabaseOperations:
         pos = row_pos["cnt"] if row_pos else 0
         pct = round((pos / total * 100), 1) if total > 0 else 100.0
         return {"positive": pos, "total": total, "percentage": pct}
+
+    def get_global_24h_match_stats(self) -> dict:
+        """Returns total matches across all levels in the last 24h, and the most recent match."""
+        count_row = self._execute(
+            """SELECT COUNT(*) AS cnt FROM matches
+               WHERE created_at >= datetime('now', '-24 hours')""",
+            fetch_one=True
+        )
+        total_24h = count_row["cnt"] if count_row else 0
+
+        last_match_row = self._execute(
+            """SELECT drs_level, match_type, created_at FROM matches
+               ORDER BY created_at DESC LIMIT 1""",
+            fetch_one=True
+        )
+
+        return {
+            "total_24h": total_24h,
+            "last_match": dict(last_match_row) if last_match_row else None
+        }
+
 
 
 

@@ -221,16 +221,19 @@ class FeedbackCog(commands.Cog):
         await self.send_match_feedback_prompt(match_id, threads)
 
     async def send_match_feedback_prompt(self, match_id: int, threads: list[dict] = None):
-        """Sends feedback prompt to all active match threads and marks DB."""
+        """Sends feedback prompt to all active match threads and marks DB atomically."""
+        # Atomically claim sending feedback for this match
+        if not self.bot.db.mark_match_feedback_sent(match_id):
+            logger.info(f"Feedback already sent for Match #{match_id}, skipping duplicate.")
+            return
+
         if not threads:
             db_threads = self.bot.db.get_match_threads(match_id)
             threads = [{"guild_id": t["guild_id"], "thread_id": t["thread_id"], "lang": self._lang(t["guild_id"])} for t in db_threads]
 
         if not threads:
-            self.bot.db.mark_match_feedback_sent(match_id)
             return
 
-        self.bot.db.mark_match_feedback_sent(match_id)
         view = build_feedback_view(match_id)
 
         for thread_info in threads:
@@ -510,4 +513,5 @@ class FeedbackCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(FeedbackCog(bot))
+
 

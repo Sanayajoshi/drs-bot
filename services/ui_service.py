@@ -29,7 +29,24 @@ LEVEL_EMOJI = {
 }
 
 
-def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[discord.Embed]:
+def _format_last_run(last_match: dict | None) -> str:
+    if not last_match:
+        return "*None yet*"
+    m_type = last_match.get("match_type", "DRS")
+    level = last_match.get("drs_level", "")
+    created_at_str = last_match.get("created_at")
+    level_tag = f"**{m_type}{level}**"
+    if not created_at_str:
+        return level_tag
+    try:
+        dt = datetime.strptime(str(created_at_str), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        ts = int(dt.timestamp())
+        return f"{level_tag} <t:{ts}:R>"
+    except Exception:
+        return level_tag
+
+
+def build_queue_embeds(full_queue_data: list[dict], lang: str = "en", activity_stats: dict | None = None) -> list[discord.Embed]:
     from services.i18n import get as t
 
     GEN = config.EMOJI_GENESIS
@@ -47,8 +64,20 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
         f"{config.EMOJI_SOS} - Need Assist On/Off",
     ]
 
+    # Activity header banner
+    activity_header = ""
+    if activity_stats:
+        total_24h = activity_stats.get("total_24h", 0)
+        last_match = activity_stats.get("last_match")
+        last_run_str = _format_last_run(last_match)
+        activity_header = f"📊 `{total_24h} runs (24h)`  |  🚀 *Last run:* {last_run_str}\n\n"
+
     # 1. Dark Red Star Queue Embed
-    drs_embed = discord.Embed(title=f"{DRS_ICON} Dark Red Star Queue", color=discord.Color.dark_red())
+    drs_embed = discord.Embed(
+        title=f"{DRS_ICON} Dark Red Star Queue",
+        color=discord.Color.dark_red(),
+        description=activity_header if activity_header else None
+    )
     drs_by_level = {lvl: [] for lvl in config.VALID_DRS_LEVELS}
     for entry in full_queue_data:
         if entry.get("queue_type", "DRS") == "DRS":
@@ -73,14 +102,18 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
             rse_lvl = e.get("modt_level", "?") if e.get("modt_level") is not None else "?"
             rows.append(f"`{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
 
+        filled = min(len(entries), config.DRS_MATCH_SIZE)
+        empty = config.DRS_MATCH_SIZE - filled
+        progress_bar = f"[{'▰' * filled}{'▱' * empty}]"
+
         drs_embed.add_field(
-            name=f"DRS{level}  ({len(entries)}/{config.DRS_MATCH_SIZE})",
+            name=f"DRS{level}  {progress_bar}  ({len(entries)}/{config.DRS_MATCH_SIZE})",
             value="\n".join(rows),
             inline=False
         )
 
     if not has_drs:
-        drs_embed.description = "*No pilots in Dark Red Star queue.*"
+        drs_embed.description = (activity_header if activity_header else "") + "*No pilots in Dark Red Star queue.*"
 
     # Add random Hint section
     hint_idx = random.randint(0, len(HINTS) - 1)
@@ -94,7 +127,11 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
     drs_embed.set_footer(text=t(lang, "queue_footer"))
 
     # 2. Red Star Queue Embed (only shown when there is a player in RS queue)
-    rs_embed = discord.Embed(title=f"{RS_ICON} Red Star Queue", color=discord.Color.red())
+    rs_embed = discord.Embed(
+        title=f"{RS_ICON} Red Star Queue",
+        color=discord.Color.red(),
+        description=activity_header if activity_header else None
+    )
     rs_by_level = {lvl: [] for lvl in config.VALID_RS_LEVELS}
     for entry in full_queue_data:
         if entry.get("queue_type", "DRS") == "RS":
@@ -119,8 +156,12 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
             rse_lvl = e.get("modt_level", "?") if e.get("modt_level") is not None else "?"
             rows.append(f"`{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
 
+        filled = min(len(entries), config.RS_MATCH_SIZE)
+        empty = config.RS_MATCH_SIZE - filled
+        progress_bar = f"[{'▰' * filled}{'▱' * empty}]"
+
         rs_embed.add_field(
-            name=f"RS{level}  ({len(entries)}/{config.RS_MATCH_SIZE})",
+            name=f"RS{level}  {progress_bar}  ({len(entries)}/{config.RS_MATCH_SIZE})",
             value="\n".join(rows),
             inline=False
         )
@@ -133,9 +174,9 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en") -> list[di
     return embeds
 
 
-def build_queue_embed(queue_data: list[dict], lang: str = "en") -> discord.Embed:
+def build_queue_embed(queue_data: list[dict], lang: str = "en", activity_stats: dict | None = None) -> discord.Embed:
     """Fallback single embed helper for legacy callers."""
-    embeds = build_queue_embeds(queue_data, lang)
+    embeds = build_queue_embeds(queue_data, lang, activity_stats=activity_stats)
     return embeds[0]
 
 
@@ -194,11 +235,17 @@ def build_queue_view() -> discord.ui.View:
         row=2
     ))
 
-    # Row 3: Combined Tech + SOS
+    # Row 3: Combined Tech + Extend (+30m) + SOS
     view.add_item(discord.ui.Button(
         emoji=parse_emoji(config.EMOJI_TECH),
         style=discord.ButtonStyle.secondary,
         custom_id="mod_set_combined",
+        row=3
+    ))
+    view.add_item(discord.ui.Button(
+        emoji="⏳",
+        style=discord.ButtonStyle.secondary,
+        custom_id="drs_extend",
         row=3
     ))
     view.add_item(discord.ui.Button(
@@ -379,6 +426,7 @@ def _format_remaining(expires_at: datetime) -> str:
         return "0m"
     mins = max(1, round(delta.total_seconds() / 60))
     return f"{mins}m"
+
 
 
 
