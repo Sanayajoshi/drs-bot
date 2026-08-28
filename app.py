@@ -23,7 +23,11 @@ intents.members = True
 
 class DRSBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix="!", intents=intents)
+        super().__init__(
+            command_prefix=commands.when_mentioned_or(*config.COMMAND_PREFIXES),
+            intents=intents,
+            help_command=None
+        )
         self.db = DatabaseOperations()
         self.bonus_service = None  # Will be initialized in setup_hook
 
@@ -47,6 +51,7 @@ class DRSBot(commands.Bot):
             "cogs.bonus_cog",  # New bonus cog
             "cogs.engagement_cog",  # Engagement & Facts cog
             "cogs.stats_cog",  # Player stats cog
+            "cogs.help_cog",  # Interactive queue button help & guide cog
         ]
         for cog in cogs:
             try:
@@ -86,6 +91,11 @@ class DRSBot(commands.Bot):
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} (id: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s).")
+        activity = discord.Activity(
+            type=discord.ActivityType.watching,
+            name="DRS & RS Queues | .help"
+        )
+        await self.change_presence(activity=activity)
 
     async def on_guild_join(self, guild: discord.Guild):
         self.db.upsert_server(guild.id)
@@ -184,6 +194,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

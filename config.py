@@ -3,7 +3,9 @@ import os
 # Bot Token
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 
-# Web Dashboard Port
+# Command Prefixes
+# Multiple custom prefixes allowed without using '!' or '/'
+COMMAND_PREFIXES = [".", ";", ",", "?", "$"]
 PORT = 3000
 
 # Database
@@ -49,4 +51,5 @@ EMOJI_QUICKSTART = "▶️"
 EMOJI_EXIT = "❌"
 EMOJI_TECH = "🛠️"
 EMOJI_SOS = "🆘"
+
 

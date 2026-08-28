@@ -66,6 +66,17 @@ class DatabaseOperations:
                 role_drs10              INTEGER,
                 role_drs11              INTEGER,
                 role_drs12              INTEGER,
+                role_rs4                INTEGER,
+                role_rs5                INTEGER,
+                role_rs6                INTEGER,
+                role_rs7                INTEGER,
+                role_rs8                INTEGER,
+                role_rs9                INTEGER,
+                role_rs10               INTEGER,
+                role_rs11               INTEGER,
+                role_rs12               INTEGER,
+                fact_frequency_hours    INTEGER NOT NULL DEFAULT 4,
+                last_fact_sent          TEXT,
                 created_at              TEXT NOT NULL DEFAULT (datetime('now'))
             )""",
             """CREATE TABLE IF NOT EXISTS users (
@@ -342,7 +353,9 @@ class DatabaseOperations:
     def upsert_server(self, guild_id: int, **kwargs) -> bool:
         fields = ["queue_channel_id", "queue_message_id", "notification_channel_id",
                   "officer_channel_id", "manager_role_id", "language",
-                  "role_drs7", "role_drs8", "role_drs9", "role_drs10", "role_drs11", "role_drs12"]
+                  "role_drs7", "role_drs8", "role_drs9", "role_drs10", "role_drs11", "role_drs12",
+                  "role_rs4", "role_rs5", "role_rs6", "role_rs7", "role_rs8", "role_rs9", "role_rs10", "role_rs11", "role_rs12",
+                  "fact_frequency_hours", "last_fact_sent"]
         updates = {k: v for k, v in kwargs.items() if k in fields}
         if not updates:
             return self._execute(
@@ -359,6 +372,7 @@ class DatabaseOperations:
             """SELECT guild_id, queue_channel_id, queue_message_id,
                       notification_channel_id, officer_channel_id, manager_role_id, language,
                       role_drs7, role_drs8, role_drs9, role_drs10, role_drs11, role_drs12,
+                      role_rs4, role_rs5, role_rs6, role_rs7, role_rs8, role_rs9, role_rs10, role_rs11, role_rs12,
                       fact_frequency_hours, last_fact_sent
                FROM servers WHERE guild_id = ?""",
             (guild_id,), fetch_one=True
@@ -368,6 +382,8 @@ class DatabaseOperations:
         return self._execute(
             """SELECT guild_id, queue_channel_id, queue_message_id,
                       notification_channel_id, officer_channel_id, manager_role_id, language,
+                      role_drs7, role_drs8, role_drs9, role_drs10, role_drs11, role_drs12,
+                      role_rs4, role_rs5, role_rs6, role_rs7, role_rs8, role_rs9, role_rs10, role_rs11, role_rs12,
                       fact_frequency_hours, last_fact_sent
                FROM servers""",
             fetch_all=True
@@ -379,11 +395,12 @@ class DatabaseOperations:
             (message_id, guild_id)
         ) is not None
 
-    def get_ping_role_for_level(self, guild_id: int, drs_level: int) -> int | None:
+    def get_ping_role_for_level(self, guild_id: int, level: int, queue_type: str = "DRS") -> int | None:
         server = self.get_server(guild_id)
         if not server:
             return None
-        return server.get(f"role_drs{drs_level}")
+        role_key = f"role_drs{level}" if str(queue_type).upper() == "DRS" else f"role_rs{level}"
+        return server.get(role_key)
 
     def upsert_user(self, discord_id: int, display_name: str) -> bool:
         return self._execute(
@@ -1124,6 +1141,7 @@ class DatabaseOperations:
             "total_24h": total_24h,
             "last_match": dict(last_match_row) if last_match_row else None
         }
+
 
 
 

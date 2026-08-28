@@ -5,6 +5,7 @@ import config
 from services.queue_service import QueueService
 from services.ui_service import build_queue_embeds, build_queue_view, CombinedTechView, QueueModeSettingsView
 from services.i18n import get as t
+from cogs.help_cog import build_main_help_embed, EphemeralHelpView
 
 logger = logging.getLogger("queue_cog")
 
@@ -314,6 +315,8 @@ class QueueCog(commands.Cog):
             await self._handle_quickstart(interaction)
         elif custom_id == "drs_need_assist":
             await self._handle_need_assist(interaction)
+        elif custom_id == "drs_help_btn":
+            await self._handle_help_button(interaction)
         elif custom_id == "mod_set_combined":
             await self._handle_combined_tech(interaction)
 
@@ -335,6 +338,19 @@ class QueueCog(commands.Cog):
         view = QueueModeSettingsView(self.bot.db, discord_id, current_mode, display_name)
         await interaction.response.send_message(
             content,
+            view=view,
+            ephemeral=True
+        )
+
+    # ------------------------------------------------------------------
+    # Help Guide Button Handler
+    # ------------------------------------------------------------------
+
+    async def _handle_help_button(self, interaction: discord.Interaction):
+        embed = build_main_help_embed()
+        view = EphemeralHelpView()
+        await interaction.response.send_message(
+            embed=embed,
             view=view,
             ephemeral=True
         )
@@ -591,6 +607,7 @@ class QueueCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(QueueCog(bot))
+
 
 
 

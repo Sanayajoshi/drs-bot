@@ -235,7 +235,7 @@ def build_queue_view() -> discord.ui.View:
         row=2
     ))
 
-    # Row 3: Combined Tech + Extend (+30m) + SOS
+    # Row 3: Combined Tech + Extend (+30m) + SOS + Help
     view.add_item(discord.ui.Button(
         emoji=parse_emoji(config.EMOJI_TECH),
         style=discord.ButtonStyle.secondary,
@@ -252,6 +252,12 @@ def build_queue_view() -> discord.ui.View:
         emoji=parse_emoji(config.EMOJI_SOS),
         style=discord.ButtonStyle.secondary,
         custom_id="drs_need_assist",
+        row=3
+    ))
+    view.add_item(discord.ui.Button(
+        emoji="❓",
+        style=discord.ButtonStyle.secondary,
+        custom_id="drs_help_btn",
         row=3
     ))
 
@@ -426,6 +432,7 @@ def _format_remaining(expires_at: datetime) -> str:
         return "0m"
     mins = max(1, round(delta.total_seconds() / 60))
     return f"{mins}m"
+
 
 
 

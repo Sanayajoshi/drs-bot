@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 import config
 from services.i18n import get as t
+from cogs.help_cog import build_main_help_embed, EphemeralHelpView
 
 logger = logging.getLogger("setup_cog")
 
@@ -200,12 +201,23 @@ class SetupCog(commands.Cog):
             role_id = server.get(f"role_drs{level}")
             if role_id:
                 ping_roles.append(f"DRS{level}: <@&{role_id}>")
+        for level in config.VALID_RS_LEVELS:
+            role_id = server.get(f"role_rs{level}")
+            if role_id:
+                ping_roles.append(f"RS{level}: <@&{role_id}>")
         if ping_roles:
             embed.add_field(name="Ping roles", value="\n".join(ping_roles), inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @drs.command(name="help", description="Interactive guide explaining all queue buttons and features")
+    async def help_command(self, interaction: discord.Interaction):
+        embed = build_main_help_embed()
+        view = EphemeralHelpView()
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(SetupCog(bot))
+
 
