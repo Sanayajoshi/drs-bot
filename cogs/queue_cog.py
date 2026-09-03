@@ -361,8 +361,9 @@ class QueueCog(commands.Cog):
 
     async def _handle_combined_tech(self, interaction: discord.Interaction):
         view = CombinedTechView(self.bot.db, interaction.user.id)
+        embed = view.build_embed()
         await interaction.response.send_message(
-            "🛠️ **Select your tech module levels below:**",
+            embed=embed,
             view=view,
             ephemeral=True
         )

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,6 +8,89 @@ from services.i18n import get as t
 from cogs.help_cog import build_main_help_embed, EphemeralHelpView
 
 logger = logging.getLogger("setup_cog")
+
+ANNOUNCEMENT_ALLOWED_USER_ID = 508209182374363137
+
+
+class AnnouncementModal(discord.ui.Modal):
+    """Modal dialog allowing authorized administrators to draft and broadcast network announcements."""
+    def __init__(self, bot):
+        super().__init__(title="Post Network Announcement")
+        self.bot = bot
+
+        self.title_input = discord.ui.TextInput(
+            label="Announcement Title",
+            default="📢 Network Announcement",
+            placeholder="Enter announcement headline...",
+            max_length=100,
+            required=True
+        )
+        self.add_item(self.title_input)
+
+        self.content_input = discord.ui.TextInput(
+            label="Announcement Message",
+            placeholder="Type your announcement to broadcast across all configured alert channels...",
+            style=discord.TextStyle.paragraph,
+            max_length=4000,
+            required=True
+        )
+        self.add_item(self.content_input)
+
+        self.footer_input = discord.ui.TextInput(
+            label="Footer Text (Optional)",
+            default="DRS Bot • Network Announcement",
+            placeholder="Custom footer text (optional)...",
+            max_length=100,
+            required=False
+        )
+        self.add_item(self.footer_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        servers = self.bot.db.get_all_servers()
+        sent_count = 0
+        failed_count = 0
+
+        embed = discord.Embed(
+            title=self.title_input.value.strip(),
+            description=self.content_input.value.strip(),
+            color=discord.Color.gold(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_author(
+            name=f"{interaction.user.display_name} (Administrator)",
+            icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None
+        )
+        footer_text = self.footer_input.value.strip() or "DRS Bot • Network Announcement"
+        embed.set_footer(text=footer_text)
+
+        for server in servers:
+            notif_cid = server.get("notification_channel_id")
+            if not notif_cid:
+                continue
+            guild_id = server["guild_id"]
+            try:
+                guild = self.bot.get_guild(guild_id)
+                channel = guild.get_channel(notif_cid) if guild else None
+                if not channel:
+                    channel = await self.bot.fetch_channel(notif_cid)
+                if channel:
+                    await channel.send(
+                        embed=embed,
+                        allowed_mentions=discord.AllowedMentions.none()
+                    )
+                    sent_count += 1
+            except Exception as e:
+                logger.error(f"Failed to send announcement to channel {notif_cid} in guild {guild_id}: {e}")
+                failed_count += 1
+
+        await interaction.followup.send(
+            f"📢 **Announcement Broadcast Completed!**\n\n"
+            f"• ✅ **Successfully posted to**: `{sent_count}` alert channel(s)\n"
+            f"• ❌ **Failed / Unreachable**: `{failed_count}` channel(s)",
+            ephemeral=True
+        )
 
 
 class SetupCog(commands.Cog):
@@ -215,6 +299,28 @@ class SetupCog(commands.Cog):
         embed = build_main_help_embed()
         view = EphemeralHelpView()
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="announcement", description="Broadcast an announcement to all server alert channels (Admin only)")
+    async def announcement_cmd(self, interaction: discord.Interaction):
+        """Opens a modal to broadcast an announcement to all configured alert channels."""
+        if interaction.user.id != ANNOUNCEMENT_ALLOWED_USER_ID:
+            await interaction.response.send_message(
+                "❌ You do not have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(AnnouncementModal(self.bot))
+
+    @app_commands.command(name="announce", description="Broadcast an announcement to all server alert channels (Admin only)")
+    async def announce_cmd(self, interaction: discord.Interaction):
+        """Opens a modal to broadcast an announcement to all configured alert channels."""
+        if interaction.user.id != ANNOUNCEMENT_ALLOWED_USER_ID:
+            await interaction.response.send_message(
+                "❌ You do not have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(AnnouncementModal(self.bot))
 
 
 async def setup(bot):

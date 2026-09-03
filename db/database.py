@@ -195,6 +195,18 @@ class DatabaseOperations:
             "CREATE INDEX IF NOT EXISTS idx_tc_corp_id ON tracked_corps(corp_id)",
             "CREATE INDEX IF NOT EXISTS idx_tc_bonus ON tracked_corps(bonus_pct DESC)",
             "CREATE INDEX IF NOT EXISTS idx_tc_active ON tracked_corps(is_active)",
+            """CREATE TABLE IF NOT EXISTS user_profiles (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_id    INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                profile_name  TEXT NOT NULL,
+                genesis_level INTEGER CHECK (genesis_level IS NULL OR (genesis_level BETWEEN 6 AND 15)),
+                enrich_level  INTEGER CHECK (enrich_level  IS NULL OR (enrich_level  BETWEEN 6 AND 15)),
+                modt_level    INTEGER CHECK (modt_level    IS NULL OR (modt_level    BETWEEN 6 AND 15)),
+                is_active     INTEGER NOT NULL DEFAULT 0,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (discord_id, profile_name)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_up_discord ON user_profiles(discord_id)",
         ]
         with self.connection:
             for stmt in stmts:
@@ -285,6 +297,18 @@ class DatabaseOperations:
                 match_id              INTEGER
             )""",
             "CREATE INDEX IF NOT EXISTS idx_qwl_discord ON queue_wait_logs(discord_id)",
+            """CREATE TABLE IF NOT EXISTS user_profiles (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_id    INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
+                profile_name  TEXT NOT NULL,
+                genesis_level INTEGER CHECK (genesis_level IS NULL OR (genesis_level BETWEEN 6 AND 15)),
+                enrich_level  INTEGER CHECK (enrich_level  IS NULL OR (enrich_level  BETWEEN 6 AND 15)),
+                modt_level    INTEGER CHECK (modt_level    IS NULL OR (modt_level    BETWEEN 6 AND 15)),
+                is_active     INTEGER NOT NULL DEFAULT 0,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (discord_id, profile_name)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_up_discord ON user_profiles(discord_id)",
         ]
         for stmt in migrations:
             try:
@@ -425,15 +449,180 @@ class DatabaseOperations:
         )
         return [r["guild_id"] for r in rows] if rows else []
 
+    def get_user_profiles(self, discord_id: int) -> list[dict]:
+        """Fetch all profiles for a user. Initializes default 'Main' profile if none exist."""
+        rows = self._execute(
+            """SELECT id, discord_id, profile_name, genesis_level, enrich_level, modt_level, is_active, created_at
+               FROM user_profiles WHERE discord_id = ?
+               ORDER BY is_active DESC, id ASC""",
+            (discord_id,), fetch_all=True
+        )
+        if not rows:
+            user = self.get_user(discord_id)
+            gen = user.get("genesis_level") if user else None
+            enr = user.get("enrich_level") if user else None
+            rse = user.get("modt_level") if user else None
+            self._execute(
+                """INSERT OR IGNORE INTO user_profiles (discord_id, profile_name, genesis_level, enrich_level, modt_level, is_active)
+                   VALUES (?, 'Main', ?, ?, ?, 1)""",
+                (discord_id, gen, enr, rse)
+            )
+            rows = self._execute(
+                """SELECT id, discord_id, profile_name, genesis_level, enrich_level, modt_level, is_active, created_at
+                   FROM user_profiles WHERE discord_id = ?
+                   ORDER BY is_active DESC, id ASC""",
+                (discord_id,), fetch_all=True
+            )
+        return rows or []
+
+    def get_active_profile(self, discord_id: int) -> dict:
+        """Fetch the active profile for a user. If none is active, activates the first one."""
+        profiles = self.get_user_profiles(discord_id)
+        if not profiles:
+            return {
+                "id": None,
+                "discord_id": discord_id,
+                "profile_name": "Main",
+                "genesis_level": None,
+                "enrich_level": None,
+                "modt_level": None,
+                "is_active": 1,
+            }
+        for p in profiles:
+            if p.get("is_active"):
+                return p
+        first = profiles[0]
+        self.set_active_profile(discord_id, first["id"])
+        first["is_active"] = 1
+        return first
+
+    def set_active_profile(self, discord_id: int, profile_id: int) -> bool:
+        """Set a profile as active and sync users table tech values."""
+        if not self.connection:
+            return False
+        try:
+            with self.connection:
+                self.connection.execute(
+                    "UPDATE user_profiles SET is_active = 0 WHERE discord_id = ?",
+                    (discord_id,)
+                )
+                self.connection.execute(
+                    "UPDATE user_profiles SET is_active = 1 WHERE discord_id = ? AND id = ?",
+                    (discord_id, profile_id)
+                )
+                cur = self.connection.execute(
+                    "SELECT genesis_level, enrich_level, modt_level FROM user_profiles WHERE id = ?",
+                    (profile_id,)
+                )
+                p = cur.fetchone()
+                if p:
+                    self.connection.execute(
+                        "UPDATE users SET genesis_level = ?, enrich_level = ?, modt_level = ? WHERE discord_id = ?",
+                        (p["genesis_level"], p["enrich_level"], p["modt_level"], discord_id)
+                    )
+            return True
+        except Exception as e:
+            self.logger.error(f"set_active_profile failed: {e}", exc_info=True)
+            return False
+
+    def save_user_profile(
+        self,
+        discord_id: int,
+        profile_name: str,
+        genesis_level: int | None = None,
+        enrich_level: int | None = None,
+        modt_level: int | None = None,
+        profile_id: int | None = None,
+        set_active: bool = False
+    ) -> int | None:
+        """Create or update a user profile and sync active tech if applicable."""
+        profile_name = (profile_name or "").strip()[:20]
+        if not profile_name:
+            profile_name = "Profile"
+
+        if profile_id:
+            self._execute(
+                """UPDATE user_profiles
+                   SET profile_name = ?, genesis_level = ?, enrich_level = ?, modt_level = ?
+                   WHERE id = ? AND discord_id = ?""",
+                (profile_name, genesis_level, enrich_level, modt_level, profile_id, discord_id)
+            )
+            target_id = profile_id
+        else:
+            existing = self.get_user_profiles(discord_id)
+            names = {p["profile_name"].lower() for p in existing}
+            orig_name = profile_name
+            count = 1
+            while profile_name.lower() in names:
+                count += 1
+                profile_name = f"{orig_name} {count}"
+
+            is_first = len(existing) == 0
+            is_active_val = 1 if (set_active or is_first) else 0
+
+            self._execute(
+                """INSERT INTO user_profiles (discord_id, profile_name, genesis_level, enrich_level, modt_level, is_active)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (discord_id, profile_name, genesis_level, enrich_level, modt_level, is_active_val)
+            )
+            row = self._execute(
+                "SELECT id FROM user_profiles WHERE discord_id = ? AND profile_name = ?",
+                (discord_id, profile_name), fetch_one=True
+            )
+            target_id = row["id"] if row else None
+
+        if set_active and target_id:
+            self.set_active_profile(discord_id, target_id)
+        elif target_id:
+            row = self._execute(
+                "SELECT is_active FROM user_profiles WHERE id = ?",
+                (target_id,), fetch_one=True
+            )
+            if row and row.get("is_active"):
+                self._execute(
+                    "UPDATE users SET genesis_level = ?, enrich_level = ?, modt_level = ? WHERE discord_id = ?",
+                    (genesis_level, enrich_level, modt_level, discord_id)
+                )
+
+        return target_id
+
+    def delete_user_profile(self, discord_id: int, profile_id: int) -> bool:
+        """Delete a profile. If it was active, sets another profile as active."""
+        profiles = self.get_user_profiles(discord_id)
+        if len(profiles) <= 1:
+            return False
+
+        target = next((p for p in profiles if p["id"] == profile_id), None)
+        if not target:
+            return False
+
+        was_active = bool(target.get("is_active"))
+        self._execute("DELETE FROM user_profiles WHERE id = ? AND discord_id = ?", (profile_id, discord_id))
+
+        if was_active:
+            remaining = self.get_user_profiles(discord_id)
+            if remaining:
+                self.set_active_profile(discord_id, remaining[0]["id"])
+        return True
+
     def set_user_mod_level(self, discord_id: int, mod: str, level: int) -> bool:
         allowed = {"genesis": "genesis_level", "enrich": "enrich_level", "modt": "modt_level"}
         col = allowed.get(mod)
         if not col:
             return False
-        return self._execute(
+        # Update users table
+        self._execute(
             f"UPDATE users SET {col} = ? WHERE discord_id = ?",
             (level, discord_id)
-        ) is not None
+        )
+        # Also update active profile
+        active_p = self.get_active_profile(discord_id)
+        if active_p and active_p.get("id"):
+            self._execute(
+                f"UPDATE user_profiles SET {col} = ? WHERE id = ?",
+                (level, active_p["id"])
+            )
+        return True
 
     def get_user_mod_levels(self, discord_id: int) -> dict:
         row = self._execute(

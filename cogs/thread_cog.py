@@ -286,25 +286,32 @@ class ThreadCog(commands.Cog):
 
     async def _handle_bell_ping(self, interaction: discord.Interaction, match_id: int):
         await interaction.response.defer(ephemeral=True)
-        participants    = self.bot.db.get_match_participants(match_id)
-        participant_ids = {p["discord_id"] for p in participants}
+        participants = self.bot.db.get_match_participants(match_id)
+        participant_ids = [p["discord_id"] for p in participants]
         if interaction.user.id not in participant_ids:
             await interaction.followup.send("Only match participants can use this.", ephemeral=True)
             return
+
+        # Map each participant to the guild they queued/signed up from
+        queue_guild_map = self.bot.db.get_participant_queue_guilds(participant_ids)
+
         all_threads = self.bot.db.get_match_threads(match_id)
         for thread_info in all_threads:
             guild_id = thread_info["guild_id"]
             try:
                 target_thread = await self.bot.fetch_channel(thread_info["thread_id"])
-                mentions = [f"<@{pid}>" for pid in participant_ids
-                            if guild_id in self.bot.db.get_user_guilds(pid)]
+                # Ping players only in the server thread they signed up from, excluding the clicker
+                mentions = [
+                    f"<@{pid}>" for pid in participant_ids
+                    if queue_guild_map.get(pid) == guild_id and pid != interaction.user.id
+                ]
                 if mentions:
-                    await target_thread.send(" ".join(mentions))
+                    await target_thread.send(f"🔔 {' '.join(mentions)}")
             except discord.NotFound:
                 pass
             except Exception as e:
                 logger.error(f"Bell ping failed for thread {thread_info['thread_id']}: {e}")
-        await interaction.followup.send("Players pinged! 🔔", ephemeral=True)
+        await interaction.followup.send("Teammates pinged! 🔔", ephemeral=True)
 
     # ------------------------------------------------------------------
     # Bell removal after 15 min
@@ -459,6 +466,7 @@ class ThreadCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ThreadCog(bot))
+
 
 
 

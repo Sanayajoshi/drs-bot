@@ -89,19 +89,22 @@ BUTTON_HELP_DATA = {
         "color": discord.Color.dark_grey(),
     },
     "tech": {
-        "title": f"{config.EMOJI_TECH} Set Tech Modules ({config.EMOJI_GENESIS} {config.EMOJI_ENRICH} {config.EMOJI_MODT})",
+        "title": f"{config.EMOJI_TECH} Tech Modules & Multi-Account Profiles ({config.EMOJI_GENESIS} {config.EMOJI_ENRICH} {config.EMOJI_MODT})",
         "emoji": parse_emoji(config.EMOJI_TECH),
-        "category": "Pilot Profile",
+        "category": "Pilot Profiles & Tech",
         "description": (
-            "Opens an interactive setup menu to configure your pilot's module levels:\n\n"
-            f"• **Genesis ({config.EMOJI_GENESIS})**: Levels 6–15 (Generates hydrogen/asteroids)\n"
-            f"• **Enrich ({config.EMOJI_ENRICH})**: Levels 6–15 (Enriches hydrogen sector)\n"
-            f"• **ModT / RSE ({config.EMOJI_MODT})**: Levels 6–15 (Red Star Extender / module tech)\n\n"
-            "When a match forms, the bot generates a strategic overview comparing your team's tech so you immediately know who should run Genesis or Enrich!"
+            "Opens an interactive control panel to manage your **Game Profiles & Alts** and configure module levels:\n\n"
+            "• **👤 Multi-Account Profiles**: Create, rename, and switch between multiple game profiles (e.g. **Main**, **Alt 1**, **CombatAlt**).\n"
+            "• **⭐ Active Profile**: Select which account is currently active. The bot automatically applies your active profile's tech to all queues and match rooms!\n"
+            f"• **{config.EMOJI_GENESIS} Genesis**: Levels 6–15 (Generates hydrogen & asteroids)\n"
+            f"• **{config.EMOJI_ENRICH} Enrich**: Levels 6–15 (Enriches hydrogen sectors)\n"
+            f"• **{config.EMOJI_MODT} ModT / RSE**: Levels 6–15 (Red Star Extender / module tech)\n\n"
+            "When a match forms, the bot compares the active tech across all participants to highlight who brings the highest Genesis, Enrich, and RSE!"
         ),
         "tips": [
-            "Your module levels are saved globally across all Discord servers using the bot.",
-            "You only need to update this when you upgrade your modules in Hades' Star."
+            "Profiles and tech levels are saved globally across all Discord servers using the bot.",
+            "Use '⭐ Set as Active' to easily switch accounts before or during matchmaking.",
+            "Click '✏️ Rename & Edit' to customize your profile names to your in-game handles."
         ],
         "color": discord.Color.teal(),
     },
@@ -205,9 +208,9 @@ class HelpSelect(discord.ui.Select):
                 emoji=parse_emoji(config.EMOJI_EXIT),
             ),
             discord.SelectOption(
-                label="Set Tech Modules",
+                label="Tech & Profiles",
                 value="tech",
-                description="Configure Genesis, Enrich, and ModT levels",
+                description="Manage profiles/alts, Genesis, Enrich & RSE tech",
                 emoji=parse_emoji(config.EMOJI_TECH),
             ),
             discord.SelectOption(
@@ -341,7 +344,7 @@ def build_main_help_embed() -> discord.Embed:
     embed.add_field(
         name="🛠️ Profile & Coordination",
         value=(
-            f"• {config.EMOJI_TECH} **Tech**: Set your Genesis ({config.EMOJI_GENESIS}), Enrich ({config.EMOJI_ENRICH}), and ModT ({config.EMOJI_MODT}) levels\n"
+            f"• {config.EMOJI_TECH} **Tech & Profiles**: Configure module levels ({config.EMOJI_GENESIS} {config.EMOJI_ENRICH} {config.EMOJI_MODT}) & manage **Main/Alt Profiles**\n"
             "• ⏳ **Extend**: Add +30 mins to your queue expiry timer\n"
             f"• {config.EMOJI_SOS} **SOS**: Request squad guidance or carry support\n"
             "• 🔔 **Bell Ping**: Alert all teammates inside the private match thread"

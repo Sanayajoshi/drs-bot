@@ -1,8 +1,11 @@
 import random
+import logging
 from datetime import datetime, timezone
 
 import discord
 import config
+
+logger = logging.getLogger("drs_bot.ui_service")
 
 def parse_emoji(emoji_str: str):
     if isinstance(emoji_str, str) and emoji_str.startswith("<") and emoji_str.endswith(">"):
@@ -264,94 +267,445 @@ def build_queue_view() -> discord.ui.View:
     return view
 
 
-class CombinedTechView(discord.ui.View):
-    def __init__(self, db, discord_id: int):
-        super().__init__(timeout=180)
+class EditProfileModal(discord.ui.Modal):
+    def __init__(self, db, discord_id: int, profile_id: int, current_name: str, cur_gen: int | None, cur_enr: int | None, cur_rse: int | None):
+        super().__init__(title=f"Edit Profile: {current_name[:15]}")
         self.db = db
         self.discord_id = discord_id
-        user_mods = self.db.get_user_mod_levels(discord_id)
+        self.profile_id = profile_id
 
-        cur_gen = user_mods.get("genesis_level") if user_mods.get("genesis_level") is not None else 6
-        cur_enr = user_mods.get("enrich_level") if user_mods.get("enrich_level") is not None else 6
-        cur_rse = user_mods.get("modt_level") if user_mods.get("modt_level") is not None else 6
+        self.name_input = discord.ui.TextInput(
+            label="Profile / Account Name (or IGN)",
+            default=current_name,
+            max_length=20,
+            required=True
+        )
+        self.add_item(self.name_input)
 
-        self.gen_val = cur_gen
-        self.enr_val = cur_enr
-        self.rse_val = cur_rse
+        self.gen_input = discord.ui.TextInput(
+            label="Genesis Level (6-15 or blank)",
+            default=str(cur_gen) if cur_gen is not None else "",
+            placeholder="6-15",
+            max_length=2,
+            required=False
+        )
+        self.add_item(self.gen_input)
 
-        # Genesis dropdown (levels 6-15)
+        self.enr_input = discord.ui.TextInput(
+            label="Enrich Level (6-15 or blank)",
+            default=str(cur_enr) if cur_enr is not None else "",
+            placeholder="6-15",
+            max_length=2,
+            required=False
+        )
+        self.add_item(self.enr_input)
+
+        self.rse_input = discord.ui.TextInput(
+            label="RSE / ModT Level (6-15 or blank)",
+            default=str(cur_rse) if cur_rse is not None else "",
+            placeholder="6-15",
+            max_length=2,
+            required=False
+        )
+        self.add_item(self.rse_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        def parse_lvl(val_str):
+            s = (val_str or "").strip()
+            if not s:
+                return None
+            try:
+                n = int(s)
+                if 6 <= n <= 15:
+                    return n
+            except ValueError:
+                pass
+            return None
+
+        name = self.name_input.value.strip() or "Profile"
+        gen = parse_lvl(self.gen_input.value)
+        enr = parse_lvl(self.enr_input.value)
+        rse = parse_lvl(self.rse_input.value)
+
+        self.db.save_user_profile(
+            self.discord_id,
+            profile_name=name,
+            genesis_level=gen,
+            enrich_level=enr,
+            modt_level=rse,
+            profile_id=self.profile_id
+        )
+
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=self.profile_id)
+        embed = view.build_embed(status_msg=f"✅ Saved tech and details for **{name}**!")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CreateProfileModal(discord.ui.Modal):
+    def __init__(self, db, discord_id: int):
+        super().__init__(title="Create New Game Profile")
+        self.db = db
+        self.discord_id = discord_id
+
+        self.name_input = discord.ui.TextInput(
+            label="Profile / Account Name (or IGN)",
+            placeholder="e.g. Alt 1, HydroAlt, CombatAlt",
+            max_length=20,
+            required=True
+        )
+        self.add_item(self.name_input)
+
+        self.gen_input = discord.ui.TextInput(
+            label="Genesis Level (6-15 or blank)",
+            placeholder="e.g. 9",
+            max_length=2,
+            required=False
+        )
+        self.add_item(self.gen_input)
+
+        self.enr_input = discord.ui.TextInput(
+            label="Enrich Level (6-15 or blank)",
+            placeholder="e.g. 8",
+            max_length=2,
+            required=False
+        )
+        self.add_item(self.enr_input)
+
+        self.rse_input = discord.ui.TextInput(
+            label="RSE / ModT Level (6-15 or blank)",
+            placeholder="e.g. 7",
+            max_length=2,
+            required=False
+        )
+        self.add_item(self.rse_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        def parse_lvl(val_str):
+            s = (val_str or "").strip()
+            if not s:
+                return None
+            try:
+                n = int(s)
+                if 6 <= n <= 15:
+                    return n
+            except ValueError:
+                pass
+            return None
+
+        name = self.name_input.value.strip() or "Alt"
+        gen = parse_lvl(self.gen_input.value)
+        enr = parse_lvl(self.enr_input.value)
+        rse = parse_lvl(self.rse_input.value)
+
+        new_id = self.db.save_user_profile(
+            self.discord_id,
+            profile_name=name,
+            genesis_level=gen,
+            enrich_level=enr,
+            modt_level=rse,
+            set_active=False
+        )
+
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=new_id)
+        embed = view.build_embed(status_msg=f"🎉 Created profile **{name}**! Click **⭐ Set as Active** whenever you play with it.")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class CombinedTechView(discord.ui.View):
+    """View allowing players to manage multiple game profiles/alts and configure tech levels."""
+
+    def __init__(self, db, discord_id: int, selected_profile_id: int | None = None):
+        super().__init__(timeout=240)
+        self.db = db
+        self.discord_id = discord_id
+
+        self.profiles = self.db.get_user_profiles(discord_id)
+        active_p = self.db.get_active_profile(discord_id)
+
+        # Determine currently selected profile
+        self.selected_profile = None
+        if selected_profile_id:
+            self.selected_profile = next((p for p in self.profiles if p["id"] == selected_profile_id), None)
+        if not self.selected_profile:
+            self.selected_profile = active_p
+
+        cur_gen = self.selected_profile.get("genesis_level")
+        cur_enr = self.selected_profile.get("enrich_level")
+        cur_rse = self.selected_profile.get("modt_level")
+
+        # Row 0: Profile Selector Dropdown
+        profile_options = []
+        for p in self.profiles:
+            is_active = bool(p.get("is_active"))
+            is_selected = (p["id"] == self.selected_profile["id"])
+            g_str = p["genesis_level"] if p["genesis_level"] is not None else "?"
+            e_str = p["enrich_level"] if p["enrich_level"] is not None else "?"
+            r_str = p["modt_level"] if p["modt_level"] is not None else "?"
+
+            prefix = "⭐ " if is_active else ""
+            desc = f"{'Active | ' if is_active else ''}Gen: {g_str} / Enr: {e_str} / RSE: {r_str}"
+            profile_options.append(
+                discord.SelectOption(
+                    label=f"{prefix}{p['profile_name']}"[:100],
+                    value=f"prof_{p['id']}",
+                    description=desc[:100],
+                    default=is_selected,
+                    emoji="⭐" if is_active else "👤"
+                )
+            )
+
+        # Option to create a new profile directly in dropdown
+        profile_options.append(
+            discord.SelectOption(
+                label="➕ Create New Account / Profile",
+                value="action_new_profile",
+                description="Add an Alt account or secondary game profile",
+                emoji="➕"
+            )
+        )
+
+        self.profile_select = discord.ui.Select(
+            placeholder="Switch or select account profile...",
+            options=profile_options,
+            row=0
+        )
+        self.profile_select.callback = self.on_profile_select
+        self.add_item(self.profile_select)
+
+        # Row 1: Genesis dropdown (6-15)
         gen_options = [
             discord.SelectOption(label=f"Genesis Level {i}", value=str(i), default=(cur_gen == i))
             for i in range(6, 16)
         ]
         self.genesis_select = discord.ui.Select(
-            placeholder=f"Genesis (Current: {cur_gen})",
+            placeholder=f"Genesis (Current: {cur_gen or 'Not set'})",
             options=gen_options,
-            row=0
+            row=1
         )
         self.genesis_select.callback = self.on_genesis_select
         self.add_item(self.genesis_select)
 
-        # Enrich dropdown (levels 6-15)
+        # Row 2: Enrich dropdown (6-15)
         enr_options = [
             discord.SelectOption(label=f"Enrich Level {i}", value=str(i), default=(cur_enr == i))
             for i in range(6, 16)
         ]
         self.enrich_select = discord.ui.Select(
-            placeholder=f"Enrich (Current: {cur_enr})",
+            placeholder=f"Enrich (Current: {cur_enr or 'Not set'})",
             options=enr_options,
-            row=1
+            row=2
         )
         self.enrich_select.callback = self.on_enrich_select
         self.add_item(self.enrich_select)
 
-        # RSE dropdown (levels 6-15)
+        # Row 3: RSE dropdown (6-15)
         rse_options = [
             discord.SelectOption(label=f"RSE Level {i}", value=str(i), default=(cur_rse == i))
             for i in range(6, 16)
         ]
         self.rse_select = discord.ui.Select(
-            placeholder=f"RSE (Current: {cur_rse})",
+            placeholder=f"RSE / ModT (Current: {cur_rse or 'Not set'})",
             options=rse_options,
-            row=2
+            row=3
         )
         self.rse_select.callback = self.on_rse_select
         self.add_item(self.rse_select)
 
-        # Save Button
-        save_btn = discord.ui.Button(
-            label="Save Tech Levels",
-            style=discord.ButtonStyle.success,
-            emoji="💾",
-            row=3
+        # Row 4: Action Buttons
+        is_already_active = bool(self.selected_profile.get("is_active"))
+
+        # Set Active Button
+        self.set_active_btn = discord.ui.Button(
+            label="Active Account" if is_already_active else "Set as Active",
+            style=discord.ButtonStyle.success if is_already_active else discord.ButtonStyle.primary,
+            emoji="⭐",
+            disabled=is_already_active,
+            row=4
         )
-        save_btn.callback = self.on_save
-        self.add_item(save_btn)
+        self.set_active_btn.callback = self.on_set_active
+        self.add_item(self.set_active_btn)
 
-    async def on_genesis_select(self, interaction: discord.Interaction):
-        self.gen_val = int(self.genesis_select.values[0])
-        await interaction.response.defer()
+        # Edit/Rename Modal Button
+        self.edit_btn = discord.ui.Button(
+            label="Rename & Edit",
+            style=discord.ButtonStyle.secondary,
+            emoji="✏️",
+            row=4
+        )
+        self.edit_btn.callback = self.on_edit_modal
+        self.add_item(self.edit_btn)
 
-    async def on_enrich_select(self, interaction: discord.Interaction):
-        self.enr_val = int(self.enrich_select.values[0])
-        await interaction.response.defer()
+        # New Profile Button
+        self.new_btn = discord.ui.Button(
+            label="New Profile",
+            style=discord.ButtonStyle.secondary,
+            emoji="➕",
+            row=4
+        )
+        self.new_btn.callback = self.on_new_modal
+        self.add_item(self.new_btn)
 
-    async def on_rse_select(self, interaction: discord.Interaction):
-        self.rse_val = int(self.rse_select.values[0])
-        await interaction.response.defer()
+        # Delete Profile Button (disabled if only 1 profile)
+        self.delete_btn = discord.ui.Button(
+            label="Delete",
+            style=discord.ButtonStyle.danger,
+            emoji="🗑️",
+            disabled=(len(self.profiles) <= 1),
+            row=4
+        )
+        self.delete_btn.callback = self.on_delete
+        self.add_item(self.delete_btn)
 
-    async def on_save(self, interaction: discord.Interaction):
-        self.db.set_user_mod_level(self.discord_id, "genesis", self.gen_val)
-        self.db.set_user_mod_level(self.discord_id, "enrich", self.enr_val)
-        self.db.set_user_mod_level(self.discord_id, "modt", self.rse_val)
-
+    def build_embed(self, status_msg: str | None = None) -> discord.Embed:
         GEN = config.EMOJI_GENESIS
         ENR = config.EMOJI_ENRICH
         RSE = config.EMOJI_MODT
-        await interaction.response.edit_message(
-            content=f"✅ **Tech levels saved!**\n{GEN} Genesis: **{self.gen_val}** | {ENR} Enrich: **{self.enr_val}** | {RSE} RSE: **{self.rse_val}**",
-            view=None
+
+        embed = discord.Embed(
+            title="🛠️ Tech Modules & Account Profiles",
+            color=discord.Color.dark_teal(),
         )
+
+        if status_msg:
+            embed.description = f"{status_msg}\n\n"
+        else:
+            embed.description = ""
+
+        embed.description += (
+            "Manage your main and alt accounts. When you join queues or match into a DRS / RS run, "
+            "the bot automatically applies your **Active Profile**'s tech levels.\n"
+        )
+
+        # List all profiles
+        profile_lines = []
+        for p in self.profiles:
+            active_tag = " `⭐ ACTIVE`" if p.get("is_active") else ""
+            selected_tag = " 👈 *(editing)*" if (p["id"] == self.selected_profile["id"]) else ""
+            g_val = p["genesis_level"] if p["genesis_level"] is not None else "?"
+            e_val = p["enrich_level"] if p["enrich_level"] is not None else "?"
+            r_val = p["modt_level"] if p["modt_level"] is not None else "?"
+            profile_lines.append(
+                f"• **{p['profile_name']}**{active_tag}{selected_tag}\n"
+                f"  └ {GEN} Genesis: `{g_val}`  |  {ENR} Enrich: `{e_val}`  |  {RSE} RSE: `{r_val}`"
+            )
+
+        embed.add_field(
+            name="📋 Your Account Profiles",
+            value="\n".join(profile_lines) if profile_lines else "*No profiles found.*",
+            inline=False
+        )
+
+        sel = self.selected_profile
+        g = sel.get("genesis_level", "?") or "?"
+        e = sel.get("enrich_level", "?") or "?"
+        r = sel.get("modt_level", "?") or "?"
+        is_act = "⭐ Active (Queues & Matches)" if sel.get("is_active") else "⚪ Inactive (Switch active below)"
+
+        embed.add_field(
+            name=f"⚙️ Selected: {sel['profile_name']}",
+            value=(
+                f"• **Status:** {is_act}\n"
+                f"• **Tech:** {GEN} Genesis: **{g}**  |  {ENR} Enrich: **{e}**  |  {RSE} RSE: **{r}**\n\n"
+                "👇 *Use the dropdowns below to quickly change levels, or click **Rename & Edit**.*"
+            ),
+            inline=False
+        )
+
+        embed.set_footer(text="Tip: Click 'Set as Active' to switch which account you are bringing to missions.")
+        return embed
+
+    async def on_profile_select(self, interaction: discord.Interaction):
+        selected_val = self.profile_select.values[0]
+        if selected_val == "action_new_profile":
+            modal = CreateProfileModal(self.db, self.discord_id)
+            await interaction.response.send_modal(modal)
+            return
+
+        if selected_val.startswith("prof_"):
+            try:
+                p_id = int(selected_val.split("_")[1])
+                view = CombinedTechView(self.db, self.discord_id, selected_profile_id=p_id)
+                embed = view.build_embed()
+                await interaction.response.edit_message(embed=embed, view=view)
+            except Exception as e:
+                logger.error(f"Error selecting profile: {e}")
+                await interaction.response.defer()
+
+    async def on_genesis_select(self, interaction: discord.Interaction):
+        gen_val = int(self.genesis_select.values[0])
+        self.db.save_user_profile(
+            self.discord_id,
+            profile_name=self.selected_profile["profile_name"],
+            genesis_level=gen_val,
+            enrich_level=self.selected_profile.get("enrich_level"),
+            modt_level=self.selected_profile.get("modt_level"),
+            profile_id=self.selected_profile["id"]
+        )
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=self.selected_profile["id"])
+        embed = view.build_embed(status_msg=f"✅ Updated Genesis to **Level {gen_val}** for **{self.selected_profile['profile_name']}**!")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_enrich_select(self, interaction: discord.Interaction):
+        enr_val = int(self.enrich_select.values[0])
+        self.db.save_user_profile(
+            self.discord_id,
+            profile_name=self.selected_profile["profile_name"],
+            genesis_level=self.selected_profile.get("genesis_level"),
+            enrich_level=enr_val,
+            modt_level=self.selected_profile.get("modt_level"),
+            profile_id=self.selected_profile["id"]
+        )
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=self.selected_profile["id"])
+        embed = view.build_embed(status_msg=f"✅ Updated Enrich to **Level {enr_val}** for **{self.selected_profile['profile_name']}**!")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_rse_select(self, interaction: discord.Interaction):
+        rse_val = int(self.rse_select.values[0])
+        self.db.save_user_profile(
+            self.discord_id,
+            profile_name=self.selected_profile["profile_name"],
+            genesis_level=self.selected_profile.get("genesis_level"),
+            enrich_level=self.selected_profile.get("enrich_level"),
+            modt_level=rse_val,
+            profile_id=self.selected_profile["id"]
+        )
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=self.selected_profile["id"])
+        embed = view.build_embed(status_msg=f"✅ Updated RSE to **Level {rse_val}** for **{self.selected_profile['profile_name']}**!")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_set_active(self, interaction: discord.Interaction):
+        self.db.set_active_profile(self.discord_id, self.selected_profile["id"])
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=self.selected_profile["id"])
+        embed = view.build_embed(status_msg=f"⭐ **{self.selected_profile['profile_name']}** is now your active account for all queues and runs!")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_edit_modal(self, interaction: discord.Interaction):
+        modal = EditProfileModal(
+            self.db,
+            self.discord_id,
+            self.selected_profile["id"],
+            self.selected_profile["profile_name"],
+            self.selected_profile.get("genesis_level"),
+            self.selected_profile.get("enrich_level"),
+            self.selected_profile.get("modt_level"),
+        )
+        await interaction.response.send_modal(modal)
+
+    async def on_new_modal(self, interaction: discord.Interaction):
+        modal = CreateProfileModal(self.db, self.discord_id)
+        await interaction.response.send_modal(modal)
+
+    async def on_delete(self, interaction: discord.Interaction):
+        if len(self.profiles) <= 1:
+            await interaction.response.send_message("❌ You must keep at least one profile.", ephemeral=True)
+            return
+
+        deleted_name = self.selected_profile["profile_name"]
+        self.db.delete_user_profile(self.discord_id, self.selected_profile["id"])
+
+        view = CombinedTechView(self.db, self.discord_id)
+        embed = view.build_embed(status_msg=f"🗑️ Deleted profile **{deleted_name}**.")
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class QueueModeSettingsView(discord.ui.View):
