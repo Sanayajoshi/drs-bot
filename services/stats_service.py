@@ -24,6 +24,20 @@ def format_hours(seconds: float) -> str:
     return f"{seconds / 3600:.2f}"
 
 
+def format_duration(seconds: float | int) -> str:
+    """Format duration in seconds into human-readable string like '45s', '14m', '1h 5m'."""
+    if not seconds or seconds < 0:
+        return "<1m"
+    sec = int(seconds)
+    if sec < 60:
+        return f"{sec}s"
+    hours = sec // 3600
+    mins = (sec % 3600) // 60
+    if hours > 0:
+        return f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
+    return f"{mins}m"
+
+
 class StatsService:
     def __init__(self, db):
         self.db = db
@@ -312,4 +326,5 @@ class StatsService:
 
         embed.set_footer(text="M.A.L.P. DRS Bot ┃ Player Analytics")
         return embed
+
 

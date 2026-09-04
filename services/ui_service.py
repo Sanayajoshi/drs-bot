@@ -414,12 +414,13 @@ class CreateProfileModal(discord.ui.Modal):
 class CombinedTechView(discord.ui.View):
     """View allowing players to manage multiple game profiles/alts and configure tech levels."""
 
-    def __init__(self, db, discord_id: int, selected_profile_id: int | None = None):
+    def __init__(self, db, discord_id: int, selected_profile_id: int | None = None, display_name: str | None = None):
         super().__init__(timeout=240)
         self.db = db
         self.discord_id = discord_id
+        self.display_name = display_name
 
-        self.profiles = self.db.get_user_profiles(discord_id)
+        self.profiles = self.db.get_user_profiles(discord_id, display_name=display_name)
         active_p = self.db.get_active_profile(discord_id)
 
         # Determine currently selected profile
@@ -428,6 +429,16 @@ class CombinedTechView(discord.ui.View):
             self.selected_profile = next((p for p in self.profiles if p["id"] == selected_profile_id), None)
         if not self.selected_profile:
             self.selected_profile = active_p
+        if not self.selected_profile:
+            self.selected_profile = {
+                "id": None,
+                "discord_id": discord_id,
+                "profile_name": "Main",
+                "genesis_level": None,
+                "enrich_level": None,
+                "modt_level": None,
+                "is_active": 1,
+            }
 
         cur_gen = self.selected_profile.get("genesis_level")
         cur_enr = self.selected_profile.get("enrich_level")
@@ -786,6 +797,7 @@ def _format_remaining(expires_at: datetime) -> str:
         return "0m"
     mins = max(1, round(delta.total_seconds() / 60))
     return f"{mins}m"
+
 
 
 

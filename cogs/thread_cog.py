@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 import config
 from services.thread_service import ThreadService
+from services.stats_service import format_duration
 from services.i18n import get as t
 from datetime import datetime, timezone
 
@@ -95,6 +96,9 @@ class ThreadCog(commands.Cog):
         # Fetch active corp bonuses once for all threads
         #active_bonuses = self.bot.db.get_active_corp_bonuses()
 
+        match_row = self.bot.db.get_match(match_id)
+        queue_duration_seconds = match_row.get("queue_duration_seconds", 0) if match_row else 0
+
         created_threads: list[dict] = []
 
         for guild_id, present_ids in guild_to_pids.items():
@@ -118,7 +122,8 @@ class ThreadCog(commands.Cog):
 
                 match_embed = self._build_match_embed(
                     match_id, drs_level, participants, id_to_corp,
-                    gen_best_ids, enr_best_ids, lang, queue_type=queue_type
+                    gen_best_ids, enr_best_ids, lang, queue_type=queue_type,
+                    queue_duration_seconds=queue_duration_seconds,
                 )
                 bell_view = self.thread_service.build_bell_view(match_id)
 
@@ -166,6 +171,7 @@ class ThreadCog(commands.Cog):
         enr_best_ids: set[int],
         lang: str,
         queue_type: str = "DRS",
+        queue_duration_seconds: int = 0,
     ) -> discord.Embed:
         if queue_type == "RS":
             title = f"🔴 Red Star {drs_level} — Match #{match_id}"
@@ -174,8 +180,10 @@ class ThreadCog(commands.Cog):
             title = t(lang, "match_title", level=drs_level, match_id=match_id)
             color = discord.Color.dark_red()
 
+        queue_time_str = format_duration(queue_duration_seconds)
         embed = discord.Embed(
             title=title,
+            description=f"⏱️ **Queue formed in:** {queue_time_str}",
             color=color
         )
 
@@ -195,7 +203,11 @@ class ThreadCog(commands.Cog):
             gen_icon = EMOJI_GENESIS if pid in gen_best_ids else EMOJI_LOW_GEN
             enr_icon = EMOJI_ENRICH  if pid in enr_best_ids else EMOJI_LOW_ENR
 
-            row = f"**`{corp:<10}`**` {name:<10}` {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
+            wait_sec = p.get("wait_seconds", 0) or 0
+            wait_min = max(0, int(round(wait_sec / 60)))
+            wait_str = f"({wait_min}m)"
+
+            row = f"**`{corp:<10}`**` {wait_str:<6}{name:<10}` {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
             rows.append(row)
 
         embed.add_field(name="\u200b", value="\n".join(rows), inline=False)
@@ -466,6 +478,7 @@ class ThreadCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ThreadCog(bot))
+
 
 
 

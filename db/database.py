@@ -27,6 +27,8 @@ class DatabaseOperations:
         self.connection: sqlite3.Connection | None = None
 
     def connect(self) -> bool:
+        if self.connection:
+            return True
         try:
             self.connection = sqlite3.connect(
                 self.db_path, check_same_thread=False,
@@ -109,10 +111,11 @@ class DatabaseOperations:
             "CREATE INDEX IF NOT EXISTS idx_queue_drs     ON queue_entries(drs_level)",
             "CREATE INDEX IF NOT EXISTS idx_queue_expires ON queue_entries(expires_at)",
             """CREATE TABLE IF NOT EXISTS matches (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                drs_level  INTEGER NOT NULL,
-                status     TEXT NOT NULL DEFAULT 'active',
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                drs_level              INTEGER NOT NULL,
+                status                 TEXT NOT NULL DEFAULT 'active',
+                created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+                queue_duration_seconds INTEGER DEFAULT 0
             )""",
             # queue_guild_id stored here so it survives queue entry deletion
             """CREATE TABLE IF NOT EXISTS match_participants (
@@ -120,6 +123,7 @@ class DatabaseOperations:
                 match_id       INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
                 discord_id     INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
                 queue_guild_id INTEGER,
+                wait_seconds   INTEGER DEFAULT 0,
                 UNIQUE (match_id, discord_id)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_mp_match ON match_participants(match_id)",
@@ -207,6 +211,22 @@ class DatabaseOperations:
                 UNIQUE (discord_id, profile_name)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_up_discord ON user_profiles(discord_id)",
+            """CREATE TABLE IF NOT EXISTS server_emojis (
+                guild_id        INTEGER PRIMARY KEY,
+                guild_name      TEXT NOT NULL,
+                corp_name       TEXT,
+                icon_url        TEXT,
+                icon_hash       TEXT,
+                emoji_id        INTEGER,
+                emoji_name      TEXT,
+                emoji_tag       TEXT,
+                member_count    INTEGER,
+                is_active       INTEGER NOT NULL DEFAULT 1,
+                last_synced_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_se_guild ON server_emojis(guild_id)",
+            "CREATE INDEX IF NOT EXISTS idx_se_emoji ON server_emojis(emoji_id)",
         ]
         with self.connection:
             for stmt in stmts:
@@ -309,6 +329,24 @@ class DatabaseOperations:
                 UNIQUE (discord_id, profile_name)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_up_discord ON user_profiles(discord_id)",
+            "ALTER TABLE matches ADD COLUMN queue_duration_seconds INTEGER DEFAULT 0",
+            "ALTER TABLE match_participants ADD COLUMN wait_seconds INTEGER DEFAULT 0",
+            """CREATE TABLE IF NOT EXISTS server_emojis (
+                guild_id        INTEGER PRIMARY KEY,
+                guild_name      TEXT NOT NULL,
+                corp_name       TEXT,
+                icon_url        TEXT,
+                icon_hash       TEXT,
+                emoji_id        INTEGER,
+                emoji_name      TEXT,
+                emoji_tag       TEXT,
+                member_count    INTEGER,
+                is_active       INTEGER NOT NULL DEFAULT 1,
+                last_synced_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_se_guild ON server_emojis(guild_id)",
+            "CREATE INDEX IF NOT EXISTS idx_se_emoji ON server_emojis(emoji_id)",
         ]
         for stmt in migrations:
             try:
@@ -433,7 +471,17 @@ class DatabaseOperations:
             (discord_id, display_name)
         ) is not None
 
+    def ensure_user(self, discord_id: int, display_name: str | None = None) -> bool:
+        """Ensure a user record exists in users table, creating a default one if missing."""
+        name = display_name or f"Pilot {str(discord_id)[-4:]}"
+        return self._execute(
+            """INSERT INTO users (discord_id, display_name) VALUES (?, ?)
+               ON CONFLICT(discord_id) DO NOTHING""",
+            (discord_id, name)
+        ) is not None
+
     def upsert_user_server(self, discord_id: int, guild_id: int, display_name: str) -> bool:
+        self.ensure_user(discord_id, display_name)
         return self._execute(
             """INSERT INTO user_servers (discord_id, guild_id, display_name, last_seen)
                VALUES (?, ?, ?, datetime('now'))
@@ -449,8 +497,9 @@ class DatabaseOperations:
         )
         return [r["guild_id"] for r in rows] if rows else []
 
-    def get_user_profiles(self, discord_id: int) -> list[dict]:
+    def get_user_profiles(self, discord_id: int, display_name: str | None = None) -> list[dict]:
         """Fetch all profiles for a user. Initializes default 'Main' profile if none exist."""
+        self.ensure_user(discord_id, display_name)
         rows = self._execute(
             """SELECT id, discord_id, profile_name, genesis_level, enrich_level, modt_level, is_active, created_at
                FROM user_profiles WHERE discord_id = ?
@@ -533,9 +582,11 @@ class DatabaseOperations:
         enrich_level: int | None = None,
         modt_level: int | None = None,
         profile_id: int | None = None,
-        set_active: bool = False
+        set_active: bool = False,
+        display_name: str | None = None
     ) -> int | None:
         """Create or update a user profile and sync active tech if applicable."""
+        self.ensure_user(discord_id, display_name)
         profile_name = (profile_name or "").strip()[:20]
         if not profile_name:
             profile_name = "Profile"
@@ -610,6 +661,7 @@ class DatabaseOperations:
         col = allowed.get(mod)
         if not col:
             return False
+        self.ensure_user(discord_id)
         # Update users table
         self._execute(
             f"UPDATE users SET {col} = ? WHERE discord_id = ?",
@@ -695,6 +747,7 @@ class DatabaseOperations:
         )
 
     def join_queue(self, discord_id: int, drs_level: int, expires_at: datetime, guild_id: int = None, queue_type: str = "DRS") -> bool:
+        self.ensure_user(discord_id)
         expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S")
         joined_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         return self._execute(
@@ -875,35 +928,43 @@ class DatabaseOperations:
         return [{"drs_level": r["drs_level"], "queue_type": r.get("queue_type", "DRS")} for r in rows] if rows else []
 
     def create_match(self, drs_level: int, participant_ids: list[int],
-                     queue_guild_map: dict[int, int] | None = None, match_type: str = "DRS") -> int | None:
+                     queue_guild_map: dict[int, int] | None = None, match_type: str = "DRS",
+                     wait_times_map: dict[int, int] | None = None,
+                     queue_duration_seconds: int = 0) -> int | None:
         """
         Create a match and record participants.
         queue_guild_map: {discord_id: queue_guild_id}
+        wait_times_map: {discord_id: wait_seconds}
         """
         if not self.connection:
             return None
         try:
             with self.connection:
                 cur = self.connection.execute(
-                    "INSERT INTO matches (drs_level, match_type) VALUES (?, ?)", (drs_level, match_type)
+                    "INSERT INTO matches (drs_level, match_type, queue_duration_seconds) VALUES (?, ?, ?)",
+                    (drs_level, match_type, queue_duration_seconds)
                 )
                 match_id = cur.lastrowid
                 for uid in participant_ids:
                     guild_id = (queue_guild_map or {}).get(uid)
+                    wait_sec = (wait_times_map or {}).get(uid, 0)
                     self.connection.execute(
-                        """INSERT INTO match_participants (match_id, discord_id, queue_guild_id)
-                           VALUES (?, ?, ?)""",
-                        (match_id, uid, guild_id)
+                        """INSERT INTO match_participants (match_id, discord_id, queue_guild_id, wait_seconds)
+                           VALUES (?, ?, ?, ?)""",
+                        (match_id, uid, guild_id, wait_sec)
                     )
             return match_id
         except Exception as e:
             self.logger.error(f"create_match failed: {e}", exc_info=True)
             return None
 
+    def get_match(self, match_id: int) -> dict | None:
+        return self._execute("SELECT * FROM matches WHERE id = ?", (match_id,), fetch_one=True)
+
     def get_match_participants(self, match_id: int) -> list[dict]:
         return self._execute(
             """SELECT mp.discord_id, u.display_name, u.genesis_level, u.enrich_level, u.modt_level,
-                      mp.queue_guild_id
+                      mp.queue_guild_id, mp.wait_seconds
                FROM match_participants mp JOIN users u ON u.discord_id = mp.discord_id
                WHERE mp.match_id = ?""",
             (match_id,), fetch_all=True
@@ -1330,6 +1391,97 @@ class DatabaseOperations:
             "total_24h": total_24h,
             "last_match": dict(last_match_row) if last_match_row else None
         }
+
+    # ------------------------------------------------------------------ server_emojis & corp_bonus helper
+
+    def get_corp_bonus(self, guild_id: int) -> dict | None:
+        """Fetch corp bonus record for a specific guild."""
+        row = self._execute(
+            """SELECT guild_id, corp_name, bonus_pct, expires_at
+               FROM corp_bonuses WHERE guild_id = ?""",
+            (guild_id,), fetch_one=True
+        )
+        if not row:
+            return None
+        return {
+            "guild_id": row["guild_id"],
+            "corp_name": row["corp_name"],
+            "bonus_pct": row["bonus_pct"],
+            "expires_at": _parse_dt(row["expires_at"]),
+        }
+
+    def upsert_server_emoji(
+        self,
+        guild_id: int,
+        guild_name: str,
+        corp_name: str | None,
+        icon_url: str | None,
+        icon_hash: str | None,
+        emoji_id: int | None,
+        emoji_name: str | None,
+        emoji_tag: str | None,
+        member_count: int | None = None,
+        is_active: int = 1,
+    ) -> bool:
+        """Insert or update registered server emoji details."""
+        return self._execute(
+            """INSERT INTO server_emojis (
+                guild_id, guild_name, corp_name, icon_url, icon_hash,
+                emoji_id, emoji_name, emoji_tag, member_count, is_active, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(guild_id) DO UPDATE SET
+                guild_name     = excluded.guild_name,
+                corp_name      = excluded.corp_name,
+                icon_url       = excluded.icon_url,
+                icon_hash      = excluded.icon_hash,
+                emoji_id       = excluded.emoji_id,
+                emoji_name     = excluded.emoji_name,
+                emoji_tag      = excluded.emoji_tag,
+                member_count   = excluded.member_count,
+                is_active      = excluded.is_active,
+                last_synced_at = datetime('now')""",
+            (guild_id, guild_name, corp_name, icon_url, icon_hash,
+             emoji_id, emoji_name, emoji_tag, member_count, is_active)
+        ) is not None
+
+    def get_server_emoji(self, guild_id: int) -> dict | None:
+        """Fetch server emoji details for a specific guild."""
+        return self._execute(
+            """SELECT guild_id, guild_name, corp_name, icon_url, icon_hash,
+                      emoji_id, emoji_name, emoji_tag, member_count, is_active,
+                      last_synced_at, created_at
+               FROM server_emojis WHERE guild_id = ?""",
+            (guild_id,), fetch_one=True
+        )
+
+    def get_server_emoji_by_emoji_id(self, emoji_id: int) -> dict | None:
+        """Fetch server emoji details by its Discord application emoji ID."""
+        return self._execute(
+            """SELECT guild_id, guild_name, corp_name, icon_url, icon_hash,
+                      emoji_id, emoji_name, emoji_tag, member_count, is_active,
+                      last_synced_at, created_at
+               FROM server_emojis WHERE emoji_id = ?""",
+            (emoji_id,), fetch_one=True
+        )
+
+    def get_all_server_emojis(self) -> list[dict]:
+        """Fetch all synced server emojis."""
+        return self._execute(
+            """SELECT guild_id, guild_name, corp_name, icon_url, icon_hash,
+                      emoji_id, emoji_name, emoji_tag, member_count, is_active,
+                      last_synced_at, created_at
+               FROM server_emojis ORDER BY guild_name ASC""",
+            fetch_all=True
+        ) or []
+
+    def delete_server_emoji(self, guild_id: int) -> bool:
+        """Remove a server emoji entry from the database."""
+        return self._execute(
+            "DELETE FROM server_emojis WHERE guild_id = ?",
+            (guild_id,)
+        ) is not None
+
+
 
 
 

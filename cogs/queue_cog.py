@@ -1,9 +1,11 @@
 import logging
+import time
 import discord
 from discord.ext import commands, tasks
 import config
 from services.queue_service import QueueService
 from services.ui_service import build_queue_embeds, build_queue_view, CombinedTechView, QueueModeSettingsView
+from services.stats_service import format_duration
 from services.i18n import get as t
 from cogs.help_cog import build_main_help_embed, EphemeralHelpView
 
@@ -32,6 +34,8 @@ class QueueCog(commands.Cog):
         self.queue_service.set_dispatch(bot.dispatch)
         # Track which (discord_id, drs_level, queue_type) combos have already been warned
         self._warned: set[tuple] = set()
+        # Track last role ping timestamp per (queue_type, drs_level) for 5-min cooldown
+        self._last_role_ping: dict[tuple[str, int], float] = {}
         self.expiry_loop.start()
         self.sync_loop.start()
 
@@ -112,6 +116,14 @@ class QueueCog(commands.Cog):
         if current > total:
             return
 
+        now = time.time()
+        ping_key = (queue_type, drs_level)
+        last_ping = self._last_role_ping.get(ping_key, 0.0)
+        is_cooldown = (now - last_ping) < 300  # 5-minute cooldown
+
+        if not is_cooldown:
+            self._last_role_ping[ping_key] = now
+
         for srv in self.bot.db.get_all_servers():
             guild_id = srv["guild_id"]
             full_srv = self.bot.db.get_server(guild_id)
@@ -129,7 +141,7 @@ class QueueCog(commands.Cog):
 
             line = f"{role_mention}**{display_name}** joined **{queue_type}{drs_level}** ({current}/{total})"
             try:
-                await channel.send(line)
+                await channel.send(line, silent=is_cooldown)
             except discord.Forbidden:
                 pass
             except Exception as e:
@@ -150,13 +162,30 @@ class QueueCog(commands.Cog):
             if not channel:
                 continue
             try:
-                await channel.send(f"🚪 **{display_name}** left **{queue_type}{drs_level}**.")
+                await channel.send(f"🚪 **{display_name}** left **{queue_type}{drs_level}**.", silent=True)
             except discord.Forbidden:
                 pass
             except Exception as e:
                 logger.error(f"notify_left failed for guild {guild_id}: {e}")
 
-    async def _notify_quickstart(self, display_name: str, drs_level: int, queue_type: str = "DRS"):
+    async def _notify_left_all(self, display_name: str, queues_str: str):
+        for srv in self.bot.db.get_all_servers():
+            guild_id = srv["guild_id"]
+            full_srv = self.bot.db.get_server(guild_id)
+            if not full_srv or not full_srv.get("notification_channel_id"):
+                continue
+            guild   = self.bot.get_guild(guild_id)
+            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            if not channel:
+                continue
+            try:
+                await channel.send(f"🚪 **{display_name}** left **{queues_str}**.", silent=True)
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                logger.error(f"notify_left_all failed for guild {guild_id}: {e}")
+
+    async def _notify_quickstart(self, trigger_discord_id: int, display_name: str, drs_level: int, queue_type: str = "DRS"):
         queue   = self.bot.db.get_queue_for_level(drs_level, queue_type=queue_type)
         current = len(queue)
         total   = config.DRS_MATCH_SIZE if queue_type == "DRS" else config.RS_MATCH_SIZE
@@ -171,11 +200,14 @@ class QueueCog(commands.Cog):
             if not channel:
                 continue
 
-            role_key = f"role_drs{drs_level}" if queue_type == "DRS" else f"role_rs{drs_level}"
-            role_id  = full_srv.get(role_key)
-            role_mention = f"<@&{role_id}> " if role_id else ""
+            # Tag only other players in this queue on the server they joined from (no role tag)
+            other_players_here = [
+                e for e in queue
+                if e["discord_id"] != trigger_discord_id and e.get("queue_guild_id") == guild_id
+            ]
+            user_mentions = " ".join(f"<@{p['discord_id']}>" for p in other_players_here) + " " if other_players_here else ""
 
-            line = f"⚡ {role_mention}**{display_name}** enabled **Quick Start** for **{queue_type}{drs_level}**! ({current}/{total})"
+            line = f"⚡ {user_mentions}**{display_name}** enabled **Quick Start** for **{queue_type}{drs_level}**! ({current}/{total})"
             try:
                 await channel.send(line)
             except discord.Forbidden:
@@ -196,7 +228,7 @@ class QueueCog(commands.Cog):
             if not channel:
                 continue
             try:
-                await channel.send(f"⏳ **{display_name}** extended their **{level_str}** slot by 30 minutes.")
+                await channel.send(f"⏳ **{display_name}** extended their **{level_str}** slot by 30 minutes.", silent=True)
             except discord.Forbidden:
                 pass
             except Exception as e:
@@ -251,7 +283,13 @@ class QueueCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_drs_match_formed(self, match_id: int, drs_level: int, participants: list[dict], queue_type: str = "DRS"):
+        # Reset role ping cooldown for this queue
+        self._last_role_ping.pop((queue_type, drs_level), None)
+
         full_participants = self.bot.db.get_match_participants(match_id)
+        match_row = self.bot.db.get_match(match_id)
+        queue_duration_seconds = match_row.get("queue_duration_seconds", 0) if match_row else 0
+        queue_time_str = format_duration(queue_duration_seconds)
         
         player_lines = []
         for p in full_participants:
@@ -273,7 +311,7 @@ class QueueCog(commands.Cog):
 
             embed = discord.Embed(
                 title=f"⚔️ {queue_type} Level {drs_level} Formed! (Match #{match_id})",
-                description=f"**Roster:**\n{roster_str}",
+                description=f"⏱️ **Queue formed in:** {queue_time_str}\n\n**Roster:**\n{roster_str}",
                 color=discord.Color.gold() if queue_type == "RS" else discord.Color.red()
             )
 
@@ -360,7 +398,12 @@ class QueueCog(commands.Cog):
     # ------------------------------------------------------------------
 
     async def _handle_combined_tech(self, interaction: discord.Interaction):
-        view = CombinedTechView(self.bot.db, interaction.user.id)
+        discord_id = interaction.user.id
+        display_name = interaction.user.display_name
+        self.bot.db.upsert_user(discord_id, display_name)
+        if interaction.guild_id:
+            self.bot.db.upsert_user_server(discord_id, interaction.guild_id, display_name)
+        view = CombinedTechView(self.bot.db, discord_id, display_name=display_name)
         embed = view.build_embed()
         await interaction.response.send_message(
             embed=embed,
@@ -419,8 +462,20 @@ class QueueCog(commands.Cog):
         discord_id = interaction.user.id
         display_name = interaction.user.display_name
 
-        self.bot.db.eject_player_from_all_queues(discord_id, reason="user_exit")
-        await interaction.followup.send("🚪 You have exited all active queues.", ephemeral=True)
+        user_queues = self.bot.db.get_user_queue_levels(discord_id)
+        if user_queues:
+            for q in user_queues:
+                self._warned.discard((discord_id, q["drs_level"], q.get("queue_type", "DRS")))
+                self._warned.discard((discord_id, q["drs_level"]))
+
+            queues_str = ", ".join(f"{q.get('queue_type', 'DRS')}{q['drs_level']}" for q in user_queues)
+            self.bot.db.eject_player_from_all_queues(discord_id, reason="user_exit")
+            await interaction.followup.send("🚪 You have exited all active queues.", ephemeral=True)
+            await self._notify_left_all(display_name, queues_str)
+        else:
+            self.bot.db.eject_player_from_all_queues(discord_id, reason="user_exit")
+            await interaction.followup.send("🚪 You are not in any active queues.", ephemeral=True)
+
         await self._push_queue_update()
 
     # ------------------------------------------------------------------
@@ -513,7 +568,7 @@ class QueueCog(commands.Cog):
             await interaction.followup.send(f"⚡ Quick Start triggered! **{queue_type}{drs_level}** match formed!", ephemeral=True)
         else:
             await interaction.followup.send(f"▶️ Quick Start enabled for **{queue_type}{drs_level}**.", ephemeral=True)
-            await self._notify_quickstart(interaction.user.display_name, drs_level, queue_type=queue_type)
+            await self._notify_quickstart(discord_id, interaction.user.display_name, drs_level, queue_type=queue_type)
 
         await self._push_queue_update()
 
@@ -608,6 +663,7 @@ class QueueCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(QueueCog(bot))
+
 
 
 

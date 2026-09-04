@@ -52,6 +52,7 @@ class DRSBot(commands.Bot):
             "cogs.engagement_cog",  # Engagement & Facts cog
             "cogs.stats_cog",  # Player stats cog
             "cogs.help_cog",  # Interactive queue button help & guide cog
+            "cogs.server_emoji_cog",  # Server icon to Application Emoji sync
         ]
         for cog in cogs:
             try:
@@ -111,7 +112,33 @@ class DRSBot(commands.Bot):
 
 
 async def start_web_server(bot: DRSBot):
+    # Ensure database connection is initialized for web queries
+    bot.db.connect()
+
     routes = web.RouteTableDef()
+
+    @routes.get('/health')
+    @routes.get('/api/health')
+    async def health_handler(request):
+        return web.json_response({
+            "status": "healthy",
+            "bot_connected": bot.is_ready(),
+            "bot_user": str(bot.user) if bot.user else None,
+            "guilds_count": len(bot.guilds) if bot.is_ready() else 0,
+            "database": "connected" if bot.db.connection else "disconnected",
+        })
+
+    @routes.get('/api/status')
+    async def status_handler(request):
+        servers = bot.db.get_all_servers()
+        queue = bot.db.get_full_queue()
+        return web.json_response({
+            "is_ready": bot.is_ready(),
+            "bot_user": str(bot.user) if bot.user else None,
+            "registered_servers": len(servers),
+            "active_queue_entries": len(queue),
+            "discord_token_configured": bool(config.BOT_TOKEN),
+        })
 
     @routes.get('/')
     async def index_handler(request):
@@ -120,44 +147,205 @@ async def start_web_server(bot: DRSBot):
         bot_user = str(bot.user) if bot.user else "Not logged in"
         status_class = "online" if is_ready else "pending"
         
+        try:
+            registered_servers = bot.db.get_all_servers()
+            server_count = len(bot.guilds) if is_ready else len(registered_servers)
+        except Exception:
+            server_count = 0
+
+        try:
+            queue_items = bot.db.get_full_queue()
+            queue_count = len(queue_items)
+        except Exception:
+            queue_items = []
+            queue_count = 0
+
         html = f"""<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>DRS Bot Dashboard</title>
+    <title>DRS Queue Bot Dashboard</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }}
-        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 500px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }}
-        h1 {{ margin-top: 0; color: #f43f5e; font-size: 1.75rem; display: flex; align-items: center; gap: 10px; }}
-        .status {{ display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; margin-bottom: 20px; }}
-        .status.online {{ background: #065f46; color: #34d399; }}
-        .status.pending {{ background: #854d0e; color: #fde047; }}
-        .info-group {{ margin-bottom: 16px; background: #0f172a; padding: 12px 16px; border-radius: 8px; border: 1px solid #334155; }}
-        .label {{ font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }}
-        .value {{ font-size: 1rem; font-weight: 500; margin-top: 4px; color: #f8fafc; }}
-        .note {{ font-size: 0.875rem; color: #94a3b8; margin-top: 20px; line-height: 1.5; border-top: 1px solid #334155; padding-top: 16px; }}
-        code {{ background: #334155; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #f1f5f9; }}
+        * {{ box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #090d16;
+            color: #f1f5f9;
+            min-height: 100vh;
+            margin: 0;
+            padding: 32px 20px;
+            display: flex;
+            justify-content: center;
+        }}
+        .container {{
+            max-width: 860px;
+            width: 100%;
+        }}
+        .header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #1e293b;
+        }}
+        .title-group {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+        .title-group h1 {{
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #f43f5e;
+            letter-spacing: -0.02em;
+        }}
+        .badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 9999px;
+            font-size: 0.8125rem;
+            font-weight: 600;
+        }}
+        .badge.online {{ background: #064e3b; color: #34d399; border: 1px solid #059669; }}
+        .badge.pending {{ background: #713f12; color: #fde047; border: 1px solid #ca8a04; }}
+        .pulse {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }}
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+        .card {{
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 12px;
+            padding: 20px;
+        }}
+        .card-label {{
+            font-size: 0.75rem;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }}
+        .card-value {{
+            font-size: 1.375rem;
+            font-weight: 700;
+            color: #f9fafb;
+        }}
+        .card-desc {{
+            font-size: 0.8125rem;
+            color: #6b7280;
+            margin-top: 4px;
+        }}
+        .section-title {{
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin: 28px 0 14px 0;
+        }}
+        .info-panel {{
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }}
+        .alert-box {{
+            background: #181c2e;
+            border: 1px solid #2d3748;
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-size: 0.875rem;
+            color: #cbd5e1;
+            line-height: 1.6;
+        }}
+        code {{
+            background: #1e293b;
+            color: #38bdf8;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            font-size: 0.8125rem;
+        }}
+        .table-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #1f2937;
+            font-size: 0.875rem;
+        }}
+        .table-row:last-child {{
+            border-bottom: none;
+        }}
+        .table-label {{ color: #9ca3af; }}
+        .table-val {{ font-weight: 500; color: #f3f4f6; }}
     </style>
 </head>
 <body>
-    <div class="card">
-        <h1>🔴 DRS Bot</h1>
-        <div>
-            <span class="status {status_class}">
-                ● {bot_status}
-            </span>
+    <div class="container">
+        <div class="header">
+            <div class="title-group">
+                <h1>🔴 DRS Queue Bot</h1>
+            </div>
+            <div class="badge {status_class}">
+                <span class="pulse"></span>
+                <span>{bot_status}</span>
+            </div>
         </div>
-        <div class="info-group">
-            <div class="label">Bot User</div>
-            <div class="value">{bot_user}</div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-label">Bot Identity</div>
+                <div class="card-value">{bot_user}</div>
+                <div class="card-desc">Discord Gateway Client</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Registered Servers</div>
+                <div class="card-value">{server_count}</div>
+                <div class="card-desc">Configured DRS Guilds</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Active Queues</div>
+                <div class="card-value">{queue_count}</div>
+                <div class="card-desc">Queued Pilots Across Levels</div>
+            </div>
         </div>
-        <div class="info-group">
-            <div class="label">Guilds Connected</div>
-            <div class="value">{len(bot.guilds) if is_ready else 0}</div>
+
+        <div class="section-title">System & Database Status</div>
+        <div class="info-panel">
+            <div class="table-row">
+                <span class="table-label">Database Storage</span>
+                <span class="table-val">SQLite ({config.DB_PATH}) - WAL Mode Active</span>
+            </div>
+            <div class="table-row">
+                <span class="table-label">Web Service Port</span>
+                <span class="table-val">{config.PORT}</span>
+            </div>
+            <div class="table-row">
+                <span class="table-label">Discord Slash Commands</span>
+                <span class="table-val">/drs, /officer, /stats, /add_corporation, /feedback</span>
+            </div>
+            <div class="table-row">
+                <span class="table-label">Supported Game Modes</span>
+                <span class="table-val">DRS 7-12 & RS 4-12 Matchmaking</span>
+            </div>
         </div>
-        <div class="note">
-            DRS Bot server is active on port {config.PORT}. To connect to Discord, set your <code>DISCORD_BOT_TOKEN</code> in the environment variables / settings menu.
+
+        <div class="section-title">Discord Connectivity</div>
+        <div class="alert-box">
+            The DRS Bot server is up and listening on port <code>{config.PORT}</code>.
+            To connect to Discord guilds, provide your <code>DISCORD_BOT_TOKEN</code> in the workspace Settings / Environment Variables menu.
         </div>
     </div>
 </body>
@@ -194,6 +382,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

@@ -1,7 +1,8 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import config
+from db.database import _parse_dt
 
 logger = logging.getLogger("queue_service")
 
@@ -62,11 +63,41 @@ class QueueService:
     async def _form_match(self, drs_level: int, entries: list[dict], queue_type: str = "DRS"):
         participant_ids = [e["discord_id"] for e in entries]
 
+        # Calculate player wait times and total queue formation duration
+        now_dt = datetime.now(timezone.utc)
+        wait_times_map: dict[int, int] = {}
+        earliest_joined = None
+
+        for e in entries:
+            j_at = e.get("joined_at")
+            if isinstance(j_at, datetime):
+                j_dt = j_at if j_at.tzinfo else j_at.replace(tzinfo=timezone.utc)
+            elif j_at:
+                j_dt = _parse_dt(j_at)
+            else:
+                j_dt = now_dt
+
+            if j_dt:
+                wait_sec = max(0, int((now_dt - j_dt).total_seconds()))
+                if earliest_joined is None or j_dt < earliest_joined:
+                    earliest_joined = j_dt
+            else:
+                wait_sec = 0
+
+            wait_times_map[e["discord_id"]] = wait_sec
+
+        queue_duration_seconds = max(0, int((now_dt - earliest_joined).total_seconds())) if earliest_joined else 0
+
         # Capture queue_guild_id BEFORE deleting entries
         queue_guild_map = self._capture_queue_guilds(participant_ids, drs_level, queue_type)
 
         # Create match in DB
-        match_id = self.db.create_match(drs_level, participant_ids, queue_guild_map, match_type=queue_type)
+        match_id = self.db.create_match(
+            drs_level, participant_ids, queue_guild_map,
+            match_type=queue_type,
+            wait_times_map=wait_times_map,
+            queue_duration_seconds=queue_duration_seconds
+        )
         if not match_id:
             logger.error(f"Failed to create match record for {queue_type} Level {drs_level}")
             return
@@ -105,4 +136,5 @@ class QueueService:
                 if r.get("queue_guild_id"):
                     result[r["discord_id"]] = r["queue_guild_id"]
         return result
+
 
