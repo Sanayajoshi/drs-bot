@@ -38,8 +38,12 @@ class ThreadService:
         # --- Players section ---
         player_lines = []
         for p in participants:
-            guild_name = guild_participant_map.get(p["discord_id"], "Unknown Server")
-            player_lines.append(f"**{p['display_name']}** · {guild_name}")
+            guild_id = p.get("queue_guild_id")
+            if not guild_id and "discord_id" in p:
+                guilds = self.db.get_user_guilds(p["discord_id"])
+                guild_id = guilds[0] if guilds else None
+            server_icon = self.db.get_server_emoji_tag(guild_id)
+            player_lines.append(f"{server_icon} **{p['display_name']}**")
         embed.add_field(name="👥 Players", value="\n".join(player_lines), inline=False)
 
         # --- RSE section — all players ---
@@ -120,3 +124,4 @@ class ThreadService:
         except Exception as e:
             logger.error(f"Translation failed: {e}", exc_info=True)
             return text
+

@@ -222,6 +222,7 @@ class DatabaseOperations:
                 emoji_tag       TEXT,
                 member_count    INTEGER,
                 is_active       INTEGER NOT NULL DEFAULT 1,
+                is_manual       INTEGER NOT NULL DEFAULT 0,
                 last_synced_at  TEXT NOT NULL DEFAULT (datetime('now')),
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             )""",
@@ -347,6 +348,7 @@ class DatabaseOperations:
             )""",
             "CREATE INDEX IF NOT EXISTS idx_se_guild ON server_emojis(guild_id)",
             "CREATE INDEX IF NOT EXISTS idx_se_emoji ON server_emojis(emoji_id)",
+            "ALTER TABLE server_emojis ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0",
         ]
         for stmt in migrations:
             try:
@@ -1422,13 +1424,14 @@ class DatabaseOperations:
         emoji_tag: str | None,
         member_count: int | None = None,
         is_active: int = 1,
+        is_manual: int = 0,
     ) -> bool:
         """Insert or update registered server emoji details."""
         return self._execute(
             """INSERT INTO server_emojis (
                 guild_id, guild_name, corp_name, icon_url, icon_hash,
-                emoji_id, emoji_name, emoji_tag, member_count, is_active, last_synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                emoji_id, emoji_name, emoji_tag, member_count, is_active, is_manual, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(guild_id) DO UPDATE SET
                 guild_name     = excluded.guild_name,
                 corp_name      = excluded.corp_name,
@@ -1439,9 +1442,10 @@ class DatabaseOperations:
                 emoji_tag      = excluded.emoji_tag,
                 member_count   = excluded.member_count,
                 is_active      = excluded.is_active,
+                is_manual      = excluded.is_manual,
                 last_synced_at = datetime('now')""",
             (guild_id, guild_name, corp_name, icon_url, icon_hash,
-             emoji_id, emoji_name, emoji_tag, member_count, is_active)
+             emoji_id, emoji_name, emoji_tag, member_count, is_active, is_manual)
         ) is not None
 
     def get_server_emoji(self, guild_id: int) -> dict | None:
@@ -1449,7 +1453,7 @@ class DatabaseOperations:
         return self._execute(
             """SELECT guild_id, guild_name, corp_name, icon_url, icon_hash,
                       emoji_id, emoji_name, emoji_tag, member_count, is_active,
-                      last_synced_at, created_at
+                      is_manual, last_synced_at, created_at
                FROM server_emojis WHERE guild_id = ?""",
             (guild_id,), fetch_one=True
         )
@@ -1459,7 +1463,7 @@ class DatabaseOperations:
         return self._execute(
             """SELECT guild_id, guild_name, corp_name, icon_url, icon_hash,
                       emoji_id, emoji_name, emoji_tag, member_count, is_active,
-                      last_synced_at, created_at
+                      is_manual, last_synced_at, created_at
                FROM server_emojis WHERE emoji_id = ?""",
             (emoji_id,), fetch_one=True
         )
@@ -1469,7 +1473,7 @@ class DatabaseOperations:
         return self._execute(
             """SELECT guild_id, guild_name, corp_name, icon_url, icon_hash,
                       emoji_id, emoji_name, emoji_tag, member_count, is_active,
-                      last_synced_at, created_at
+                      is_manual, last_synced_at, created_at
                FROM server_emojis ORDER BY guild_name ASC""",
             fetch_all=True
         ) or []
@@ -1480,6 +1484,20 @@ class DatabaseOperations:
             "DELETE FROM server_emojis WHERE guild_id = ?",
             (guild_id,)
         ) is not None
+
+    def get_server_emoji_tag(self, guild_id: int | None, fallback: str = "🌐") -> str:
+        """Return the formatted emoji tag for a guild, falling back to a default icon."""
+        if not guild_id:
+            return fallback
+        row = self.get_server_emoji(guild_id)
+        if row and row.get("emoji_tag"):
+            return row["emoji_tag"]
+        return fallback
+
+    def get_server_emoji_map(self, fallback: str = "🌐") -> dict[int, str]:
+        """Return a mapping of guild_id to emoji_tag."""
+        rows = self.get_all_server_emojis()
+        return {r["guild_id"]: (r.get("emoji_tag") or fallback) for r in rows}
 
 
 

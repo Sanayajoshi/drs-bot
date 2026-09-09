@@ -66,17 +66,17 @@ class ThreadCog(commands.Cog):
             if g:
                 guild_to_pids.setdefault(g, []).append(pid)
 
-        # discord_id → corp name (the guild name they queued from)
+        # discord_id → corp name (the guild name they queued from) and server emoji
         id_to_corp: dict[int, str] = {}
+        id_to_emoji: dict[int, str] = {}
         for pid in participant_ids:
             g_id = queue_guild_map.get(pid)
-            if g_id:
-                g = self.bot.get_guild(g_id)
-                id_to_corp[pid] = g.name if g else "Unknown"
-            else:
+            if not g_id:
                 guilds = self.bot.db.get_user_guilds(pid)
-                g = self.bot.get_guild(guilds[0]) if guilds else None
-                id_to_corp[pid] = g.name if g else "Unknown"
+                g_id = guilds[0] if guilds else None
+            g = self.bot.get_guild(g_id) if g_id else None
+            id_to_corp[pid] = g.name if g else "Unknown"
+            id_to_emoji[pid] = self.bot.db.get_server_emoji_tag(g_id)
 
         # GEN/ENR assignment — all players tied at the highest level get the role icon
         gen_players = [p for p in participants if p.get("genesis_level") is not None]
@@ -124,6 +124,7 @@ class ThreadCog(commands.Cog):
                     match_id, drs_level, participants, id_to_corp,
                     gen_best_ids, enr_best_ids, lang, queue_type=queue_type,
                     queue_duration_seconds=queue_duration_seconds,
+                    id_to_emoji=id_to_emoji,
                 )
                 bell_view = self.thread_service.build_bell_view(match_id)
 
@@ -172,6 +173,7 @@ class ThreadCog(commands.Cog):
         lang: str,
         queue_type: str = "DRS",
         queue_duration_seconds: int = 0,
+        id_to_emoji: dict[int, str] | None = None,
     ) -> discord.Embed:
         if queue_type == "RS":
             title = f"🔴 Red Star {drs_level} — Match #{match_id}"
@@ -190,8 +192,8 @@ class ThreadCog(commands.Cog):
         rows = []
         for p in participants:
             pid     = p["discord_id"]
-            name    = p["display_name"][:10]
-            corp    = id_to_corp.get(pid, "Unknown")[:10]
+            name    = p["display_name"][:12]
+            server_icon = (id_to_emoji.get(pid) if id_to_emoji else None) or self.bot.db.get_server_emoji_tag(p.get("queue_guild_id"))
             gen_lvl = p.get("genesis_level")
             enr_lvl = p.get("enrich_level")
             rse_lvl = p.get("modt_level")
@@ -207,7 +209,7 @@ class ThreadCog(commands.Cog):
             wait_min = max(0, int(round(wait_sec / 60)))
             wait_str = f"({wait_min}m)"
 
-            row = f"**`{corp:<10}`**` {wait_str:<6}{name:<10}` {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
+            row = f"{server_icon} ` {wait_str:<6}{name:<12}` {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
             rows.append(row)
 
         embed.add_field(name="\u200b", value="\n".join(rows), inline=False)
@@ -391,10 +393,11 @@ class ThreadCog(commands.Cog):
         source_server   = self.bot.db.get_server(source_guild_id)
         source_lang     = source_server.get("language", "en") if source_server else "en"
 
-        # Corp name for the sender = the guild name they're posting from
+        # Server emoji and corp name for sender
+        source_icon  = self.bot.db.get_server_emoji_tag(source_guild_id)
         source_guild = self.bot.get_guild(source_guild_id)
         corp_name    = source_guild.name if source_guild else "Unknown"
-        author_label = f"{message.author.display_name}[{corp_name}]"
+        author_label = f"{message.author.display_name} [{corp_name}]"
 
         all_threads = self.bot.db.get_match_threads(match_id)
 
@@ -410,14 +413,14 @@ class ThreadCog(commands.Cog):
             # Translate only if languages differ
             if source_lang != target_lang:
                 translated = await self.thread_service.translate(content, source_lang, target_lang)
-                embed = discord.Embed(description=translated, color=discord.Color.dark_gray())
+                embed = discord.Embed(description=f"{source_icon} {translated}", color=discord.Color.dark_gray())
                 embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
                 # Show original message in footer when translation happened
                 if translated != content:
                     footer_text = content[:200] + ("…" if len(content) > 200 else "")
                     embed.set_footer(text=f"Original: {footer_text}")
             else:
-                embed = discord.Embed(description=content, color=discord.Color.dark_gray())
+                embed = discord.Embed(description=f"{source_icon} {content}", color=discord.Color.dark_gray())
                 embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
 
             try:
@@ -433,6 +436,7 @@ class ThreadCog(commands.Cog):
         source_server   = self.bot.db.get_server(source_guild_id)
         source_lang     = source_server.get("language", "en") if source_server else "en"
 
+        source_icon  = self.bot.db.get_server_emoji_tag(source_guild_id)
         source_guild = self.bot.get_guild(source_guild_id)
         corp_name    = source_guild.name if source_guild else "Unknown"
         author_label = f"🛡️ {message.author.display_name} [{corp_name}]"
@@ -450,13 +454,13 @@ class ThreadCog(commands.Cog):
 
             if source_lang != target_lang:
                 translated = await self.thread_service.translate(content, source_lang, target_lang)
-                embed = discord.Embed(description=translated, color=discord.Color.red())
+                embed = discord.Embed(description=f"🛡️ {source_icon} {translated}", color=discord.Color.red())
                 embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
                 if translated != content:
                     footer_text = content[:200] + ("…" if len(content) > 200 else "")
                     embed.set_footer(text=f"Original: {footer_text}")
             else:
-                embed = discord.Embed(description=content, color=discord.Color.red())
+                embed = discord.Embed(description=f"🛡️ {source_icon} {content}", color=discord.Color.red())
                 embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
 
             try:

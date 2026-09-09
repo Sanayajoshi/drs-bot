@@ -49,7 +49,12 @@ def _format_last_run(last_match: dict | None) -> str:
         return level_tag
 
 
-def build_queue_embeds(full_queue_data: list[dict], lang: str = "en", activity_stats: dict | None = None) -> list[discord.Embed]:
+def build_queue_embeds(
+    full_queue_data: list[dict],
+    lang: str = "en",
+    activity_stats: dict | None = None,
+    emoji_map: dict[int, str] | None = None
+) -> list[discord.Embed]:
     from services.i18n import get as t
 
     GEN = config.EMOJI_GENESIS
@@ -103,7 +108,8 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en", activity_s
             gen_lvl = e.get("genesis_level", "?") if e.get("genesis_level") is not None else "?"
             enr_lvl = e.get("enrich_level", "?") if e.get("enrich_level") is not None else "?"
             rse_lvl = e.get("modt_level", "?") if e.get("modt_level") is not None else "?"
-            rows.append(f"`{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
+            server_icon = (emoji_map.get(e.get("queue_guild_id")) if emoji_map else None) or e.get("emoji_tag") or "🌐"
+            rows.append(f"{server_icon} `{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
 
         filled = min(len(entries), config.DRS_MATCH_SIZE)
         empty = config.DRS_MATCH_SIZE - filled
@@ -157,7 +163,8 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en", activity_s
             gen_lvl = e.get("genesis_level", "?") if e.get("genesis_level") is not None else "?"
             enr_lvl = e.get("enrich_level", "?") if e.get("enrich_level") is not None else "?"
             rse_lvl = e.get("modt_level", "?") if e.get("modt_level") is not None else "?"
-            rows.append(f"`{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
+            server_icon = (emoji_map.get(e.get("queue_guild_id")) if emoji_map else None) or e.get("emoji_tag") or "🌐"
+            rows.append(f"{server_icon} `{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
 
         filled = min(len(entries), config.RS_MATCH_SIZE)
         empty = config.RS_MATCH_SIZE - filled
@@ -177,9 +184,14 @@ def build_queue_embeds(full_queue_data: list[dict], lang: str = "en", activity_s
     return embeds
 
 
-def build_queue_embed(queue_data: list[dict], lang: str = "en", activity_stats: dict | None = None) -> discord.Embed:
+def build_queue_embed(
+    queue_data: list[dict],
+    lang: str = "en",
+    activity_stats: dict | None = None,
+    emoji_map: dict[int, str] | None = None
+) -> discord.Embed:
     """Fallback single embed helper for legacy callers."""
-    embeds = build_queue_embeds(queue_data, lang, activity_stats=activity_stats)
+    embeds = build_queue_embeds(queue_data, lang, activity_stats=activity_stats, emoji_map=emoji_map)
     return embeds[0]
 
 

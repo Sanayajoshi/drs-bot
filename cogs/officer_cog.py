@@ -261,10 +261,11 @@ class OfficerCog(commands.Cog):
 
         player_lines = []
         for p in participants:
+            server_icon = self.bot.db.get_server_emoji_tag(p.get("queue_guild_id"))
             gen = p["genesis_level"] or "?"
             enr = p["enrich_level"]  or "?"
             rse = p["modt_level"]    or "?"
-            player_lines.append(f"**{p['display_name']}** — GEN:{gen} ENR:{enr} RSE:{rse}")
+            player_lines.append(f"{server_icon} **{p['display_name']}** — GEN:{gen} ENR:{enr} RSE:{rse}")
         embed.add_field(name="Players", value="\n".join(player_lines) or "None", inline=False)
 
         if feedback:
@@ -798,5 +799,6 @@ class OfficerCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(OfficerCog(bot))
+
 
 

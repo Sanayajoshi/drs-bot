@@ -20,7 +20,7 @@ load_dotenv()
 
 import config
 from db.database import DatabaseOperations
-from cogs.server_emoji_cog import sanitize_emoji_name
+from cogs.server_emoji_cog import sanitize_emoji_name, optimize_emoji_bytes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,7 +64,9 @@ async def run_sync(force_update: bool = True, clean_legacy: bool = True):
             logger.info(f"Targeting {len(target_guild_ids)} registered guild(s)...")
 
             db_emojis = db.get_all_server_emojis()
-            db_emoji_ids = {r["emoji_id"] for r in db_emojis if r.get("emoji_id")}
+            manual_records = {r["guild_id"]: r for r in db_emojis if r.get("is_manual") == 1}
+            manual_emoji_ids = {r["emoji_id"] for r in manual_records.values() if r.get("emoji_id")}
+            db_emoji_ids = {r["emoji_id"] for r in db_emojis if r.get("emoji_id") and r.get("is_manual") != 1}
 
             # 3. Strictly targeted removal of ONLY legacy emojis: g_ or pyrex
             deleted_old_count = 0
@@ -76,12 +78,13 @@ async def run_sync(force_update: bool = True, clean_legacy: bool = True):
                     # 2. Contains "pyrex"
                     # 3. ID in db_emoji_ids
                     #
-                    # All other emojis are 100% preserved!
+                    # All other emojis (and manual overrides) are 100% preserved!
                     is_g_prefix = emoji.name.startswith("g_")
                     is_pyrex = "pyrex" in name_lower
                     is_tracked_hub = emoji.id in db_emoji_ids
+                    is_manual_lock = emoji.id in manual_emoji_ids
 
-                    if is_g_prefix or is_pyrex or is_tracked_hub:
+                    if (is_g_prefix or is_pyrex or is_tracked_hub) and not is_manual_lock:
                         try:
                             logger.info(f"[X] Safely removing legacy emoji '{emoji.name}' ({emoji.id})...")
                             await emoji.delete(reason="One-time cleanup of g_ / pyrex server emojis")
@@ -100,8 +103,15 @@ async def run_sync(force_update: bool = True, clean_legacy: bool = True):
             updated_count = 0
             unchanged_count = 0
             no_icon_count = 0
+            manual_count = 0
 
             for guild_id in target_guild_ids:
+                if guild_id in manual_records:
+                    rec = manual_records[guild_id]
+                    logger.info(f"[=] Preserving manual custom emoji for '{rec.get('guild_name', guild_id)}' ({guild_id}): {rec.get('emoji_tag')}")
+                    manual_count += 1
+                    continue
+
                 guild = client.get_guild(guild_id)
                 if not guild:
                     try:
@@ -143,13 +153,29 @@ async def run_sync(force_update: bool = True, clean_legacy: bool = True):
                         existing_emoji = existing_by_id.get(db_record["emoji_id"])
 
                 # Read icon scaled to 128px
+                is_animated = bool(guild.icon and guild.icon.is_animated())
                 try:
                     icon_asset = guild.icon.with_size(128)
-                    if not guild.icon.is_animated():
+                    if not is_animated:
                         icon_asset = icon_asset.with_format("png")
                     image_bytes = await icon_asset.read()
                 except Exception:
                     image_bytes = await guild.icon.read()
+
+                # Automatically compress/optimize if asset exceeds Discord's 256KB limit (error 50138)
+                if len(image_bytes) > 250_000:
+                    logger.info(f"[~] Asset for '{guild_name}' ({len(image_bytes)} bytes) exceeds 250KB. Optimizing with ffmpeg...")
+                    image_bytes = optimize_emoji_bytes(image_bytes, is_animated=is_animated)
+                    logger.info(f"[~] Optimized size for '{guild_name}': {len(image_bytes)} bytes.")
+
+                # If still over 256KB after ffmpeg optimization, fallback to static PNG from Discord
+                if len(image_bytes) > 256_000 and is_animated:
+                    try:
+                        logger.warning(f"[!] Animated GIF for '{guild_name}' exceeded 256KB. Falling back to static PNG.")
+                        png_asset = guild.icon.with_format("png").with_size(128)
+                        image_bytes = await png_asset.read()
+                    except Exception as fb_err:
+                        logger.warning(f"[!] Could not fetch static PNG fallback for '{guild_name}': {fb_err}")
 
                 final_emoji = None
 
@@ -195,6 +221,7 @@ async def run_sync(force_update: bool = True, clean_legacy: bool = True):
             logger.info("========================================")
             logger.info("Synchronization Complete!")
             logger.info(f"• Total Guilds:    {len(target_guild_ids)}")
+            logger.info(f"• Preserved Manual:{manual_count}")
             logger.info(f"• Cleaned Legacy:  {deleted_old_count}")
             logger.info(f"• Created:         {created_count}")
             logger.info(f"• Updated:         {updated_count}")
