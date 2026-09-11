@@ -63,9 +63,22 @@ class QueueCog(commands.Cog):
         if not channel_id:
             return
         guild   = self.bot.get_guild(guild_id)
-        channel = guild and guild.get_channel(channel_id)
+        if not guild:
+            return
+        channel = guild.get_channel(channel_id)
         if not channel:
             return
+
+        bot_member = guild.me or guild.get_member(self.bot.user.id)
+        if bot_member:
+            perms = channel.permissions_for(bot_member)
+            if not perms.view_channel or not perms.send_messages or not perms.embed_links:
+                logger.warning(
+                    f"Cannot ensure queue message for guild '{guild.name}' ({guild_id}): "
+                    f"Bot lacks permissions in #{channel.name} (view={perms.view_channel}, send={perms.send_messages}, embed={perms.embed_links})"
+                )
+                return
+
         full_server = self.bot.db.get_server(guild_id)
         lang  = full_server.get("language", "en") if full_server else "en"
         activity_stats = self.bot.db.get_global_24h_match_stats()
@@ -78,9 +91,23 @@ class QueueCog(commands.Cog):
                 await msg.edit(embeds=embeds, view=view)
                 return
             except discord.NotFound:
+                # Message was deleted or invalid; proceed to send a new message
                 pass
-        msg = await channel.send(embeds=embeds, view=view)
-        self.bot.db.set_queue_message_id(guild_id, msg.id)
+            except discord.Forbidden as e:
+                logger.warning(
+                    f"Forbidden fetching/editing queue message {message_id} in {channel_id} (guild {guild_id}): {e}. "
+                    f"Will attempt to post fresh queue board."
+                )
+            except discord.HTTPException as e:
+                logger.warning(f"HTTP error fetching/editing queue message {message_id} in {channel_id} (guild {guild_id}): {e}")
+
+        try:
+            msg = await channel.send(embeds=embeds, view=view)
+            self.bot.db.set_queue_message_id(guild_id, msg.id)
+        except discord.Forbidden as e:
+            logger.warning(f"Permission denied (403 Forbidden) sending queue message to #{channel.name} in guild '{guild.name}' ({guild_id}): {e}")
+        except discord.HTTPException as e:
+            logger.error(f"HTTP error sending queue message to #{channel.name} in guild '{guild.name}' ({guild_id}): {e}")
 
     # ------------------------------------------------------------------
     # Push update
@@ -92,20 +119,39 @@ class QueueCog(commands.Cog):
         emoji_map = self.bot.db.get_server_emoji_map()
         view = build_queue_view()
         for server in self.bot.db.get_all_servers():
+            guild_id = server["guild_id"]
+            channel_id = server.get("queue_channel_id")
+            message_id = server.get("queue_message_id")
+            if not channel_id or not message_id:
+                continue
+
             try:
-                guild   = self.bot.get_guild(server["guild_id"])
-                channel = guild and guild.get_channel(server["queue_channel_id"])
-                if not channel or not server.get("queue_message_id"):
+                guild = self.bot.get_guild(guild_id)
+                if not guild:
                     continue
-                full_server = self.bot.db.get_server(server["guild_id"])
+                channel = guild.get_channel(channel_id)
+                if not channel:
+                    continue
+
+                bot_member = guild.me or guild.get_member(self.bot.user.id)
+                if bot_member:
+                    perms = channel.permissions_for(bot_member)
+                    if not perms.view_channel or not perms.read_message_history:
+                        continue
+
+                full_server = self.bot.db.get_server(guild_id)
                 lang  = full_server.get("language", "en") if full_server else "en"
                 embeds = build_queue_embeds(queue_data, lang, activity_stats=activity_stats, emoji_map=emoji_map)
-                msg = await channel.fetch_message(server["queue_message_id"])
+                msg = await channel.fetch_message(message_id)
                 await msg.edit(embeds=embeds, view=view)
             except discord.NotFound:
                 pass
+            except discord.Forbidden as e:
+                logger.warning(f"Push update forbidden for guild {guild_id} in channel {channel_id}: {e}")
+            except discord.HTTPException as e:
+                logger.warning(f"Push update HTTP error for guild {guild_id}: {e}")
             except Exception as e:
-                logger.error(f"Push update error for guild {server['guild_id']}: {e}")
+                logger.error(f"Push update error for guild {guild_id}: {e}")
 
     # ------------------------------------------------------------------
     # Join notification — plain text, with server emoji

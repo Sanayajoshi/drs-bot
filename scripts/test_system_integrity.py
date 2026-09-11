@@ -206,6 +206,13 @@ class TestI18nAndUI(unittest.TestCase):
                 self.assertNotIn("{queue}", text)
                 self.assertNotIn("{icon}", text)
 
+        # Test lang_set with keyword argument 'lang' and 'language' without TypeError
+        for lang_code in languages:
+            formatted_lang = i18n.get(lang_code, "lang_set", lang="TestLang")
+            self.assertIn("TestLang", formatted_lang)
+            formatted_synonym = i18n.get(lang_code, "lang_set", language="TestLang2")
+            self.assertIn("TestLang2", formatted_synonym)
+
     def test_embed_builders_across_all_languages(self):
         languages = ["en", "de", "hi", "pl", "fr", "es", "ja"]
         queue_types = ["DRS", "RS"]
@@ -351,6 +358,47 @@ class TestServicesAndCogs(unittest.IsolatedAsyncioTestCase):
         self.assertIn("total_reports_against", dossier)
         embed = inv_svc.build_player_dossier_embed(dossier)
         self.assertIsNotNone(embed)
+
+    async def test_queue_cog_forbidden_handling(self):
+        from unittest.mock import MagicMock, AsyncMock
+        from cogs.queue_cog import QueueCog
+        import discord
+
+        cog = QueueCog(self.bot)
+
+        # Mock forbidden response
+        mock_resp = MagicMock()
+        mock_resp.status = 403
+        mock_resp.reason = "Forbidden"
+
+        # Mock channel with missing access
+        mock_channel = MagicMock(spec=discord.TextChannel)
+        mock_channel.id = 8888
+        mock_channel.name = "drs-queue"
+        mock_channel.permissions_for.return_value = discord.Permissions.all()
+        mock_channel.fetch_message = AsyncMock(side_effect=discord.Forbidden(mock_resp, "Missing Access"))
+        mock_channel.send = AsyncMock(side_effect=discord.Forbidden(mock_resp, "Missing Access"))
+
+        mock_guild = MagicMock(spec=discord.Guild)
+        mock_guild.id = 7777
+        mock_guild.name = "Test Guild"
+        mock_guild.get_channel.return_value = mock_channel
+        self.bot.get_guild = MagicMock(return_value=mock_guild)
+
+        server_dict = {
+            "guild_id": 7777,
+            "queue_channel_id": 8888,
+            "queue_message_id": 9999
+        }
+
+        # Should handle Forbidden without raising exception
+        try:
+            await cog._ensure_queue_message(server_dict)
+            await cog._push_queue_update()
+        except discord.Forbidden:
+            self.fail("QueueCog failed to catch discord.Forbidden gracefully")
+        finally:
+            cog.cog_unload()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -136,6 +136,13 @@ class SetupCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
+        old_server = self.bot.db.get_server(interaction.guild_id)
+        queue_channel_changed = bool(
+            old_server
+            and old_server.get("queue_channel_id")
+            and old_server.get("queue_channel_id") != queue_channel.id
+        )
+
         self.bot.db.upsert_server(
             interaction.guild_id,
             queue_channel_id        = queue_channel.id,
@@ -144,16 +151,75 @@ class SetupCog(commands.Cog):
             manager_role_id         = manager_role.id,
         )
 
+        if queue_channel_changed:
+            self.bot.db.set_queue_message_id(interaction.guild_id, None)
+
         server = self.bot.db.get_server(interaction.guild_id)
         queue_cog = self.bot.cogs.get("QueueCog")
+        queue_post_warning = None
         if queue_cog:
-            await queue_cog._ensure_queue_message(server)
+            try:
+                await queue_cog._ensure_queue_message(server)
+            except discord.Forbidden as e:
+                logger.warning(f"Forbidden ensuring queue message during setup for guild {interaction.guild_id}: {e}")
+                queue_post_warning = (
+                    f"⚠️ The queue board could not be posted automatically in {queue_channel.mention} "
+                    f"due to missing bot permissions (`403 Forbidden`)."
+                )
+            except Exception as e:
+                logger.error(f"Error ensuring queue message during setup for guild {interaction.guild_id}: {e}")
+                queue_post_warning = f"⚠️ Could not post the initial queue board: `{e}`."
 
-        embed = discord.Embed(title=t(lang, "setup_success_title"), color=discord.Color.green())
+        # Verify bot permissions across configured channels
+        bot_member = interaction.guild.me or interaction.guild.get_member(self.bot.user.id)
+        channel_perm_warnings = []
+        if bot_member:
+            q_perms = queue_channel.permissions_for(bot_member)
+            q_missing = []
+            if not q_perms.view_channel: q_missing.append("View Channel")
+            if not q_perms.send_messages: q_missing.append("Send Messages")
+            if not q_perms.embed_links: q_missing.append("Embed Links")
+            if not q_perms.read_message_history: q_missing.append("Read Message History")
+            if q_missing:
+                channel_perm_warnings.append(f"• **Queue Channel** ({queue_channel.mention}): missing `{', '.join(q_missing)}`")
+
+            n_perms = notification_channel.permissions_for(bot_member)
+            n_missing = []
+            if not n_perms.view_channel: n_missing.append("View Channel")
+            if not n_perms.send_messages: n_missing.append("Send Messages")
+            if not n_perms.embed_links: n_missing.append("Embed Links")
+            if not n_perms.create_public_threads: n_missing.append("Create Public Threads")
+            if not n_perms.send_messages_in_threads: n_missing.append("Send Messages in Threads")
+            if n_missing:
+                channel_perm_warnings.append(f"• **Notification Channel** ({notification_channel.mention}): missing `{', '.join(n_missing)}`")
+
+            o_perms = officer_channel.permissions_for(bot_member)
+            o_missing = []
+            if not o_perms.view_channel: o_missing.append("View Channel")
+            if not o_perms.send_messages: o_missing.append("Send Messages")
+            if not o_perms.embed_links: o_missing.append("Embed Links")
+            if o_missing:
+                channel_perm_warnings.append(f"• **Officer Channel** ({officer_channel.mention}): missing `{', '.join(o_missing)}`")
+
+        has_warnings = bool(channel_perm_warnings or queue_post_warning)
+        embed = discord.Embed(
+            title=t(lang, "setup_success_title"),
+            color=discord.Color.yellow() if has_warnings else discord.Color.green()
+        )
         embed.add_field(name="Queue channel",        value=queue_channel.mention,        inline=False)
         embed.add_field(name="Notification channel", value=notification_channel.mention, inline=False)
         embed.add_field(name="Officer channel",      value=officer_channel.mention,      inline=False)
         embed.add_field(name="Manager role",         value=manager_role.mention,         inline=False)
+
+        if queue_post_warning:
+            embed.add_field(name="Queue Message Notice", value=queue_post_warning, inline=False)
+        if channel_perm_warnings:
+            embed.add_field(
+                name="⚠️ Missing Bot Permissions Detected",
+                value="\n".join(channel_perm_warnings) + "\n\n*Please ensure the bot's role has these permissions in those channels.*",
+                inline=False
+            )
+
         embed.set_footer(text=t(lang, "setup_footer"))
 
         await interaction.followup.send(embed=embed, ephemeral=True)

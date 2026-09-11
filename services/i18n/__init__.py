@@ -65,7 +65,7 @@ class _SafeFormatDict(dict):
         return ""
 
 
-def get(lang: str, key: str, **kwargs: Any) -> str:
+def get(*args: Any, **kwargs: Any) -> str:
     """
     Return the localised string for `key` in `lang`.
     Priority:
@@ -75,9 +75,25 @@ def get(lang: str, key: str, **kwargs: Any) -> str:
       4. File translations for `en` (source of truth)
     If the value is a list, a random item is chosen each call.
     Safely formats kwargs and cleans extra spacing.
+    Supports both positional `t(lang, key, **kwargs)` and keyword kwargs containing `lang=...`
+    without collision or TypeError.
     """
-    if not lang:
-        lang = "en"
+    lang = "en"
+    key = ""
+    if len(args) >= 1:
+        lang = str(args[0]) if args[0] else "en"
+    elif "locale" in kwargs:
+        lang = str(kwargs.pop("locale"))
+    elif "lang_code" in kwargs:
+        lang = str(kwargs.pop("lang_code"))
+    elif "lang" in kwargs and len(args) == 0 and "key" in kwargs:
+        lang = str(kwargs.get("lang"))
+
+    if len(args) >= 2:
+        key = str(args[1]) if args[1] else ""
+    elif "key" in kwargs:
+        key = str(kwargs.pop("key"))
+
     lang = lang.lower()
 
     # 1. DB requested language
@@ -97,8 +113,9 @@ def get(lang: str, key: str, **kwargs: Any) -> str:
 
     if kwargs:
         try:
-            # Map synonyms: pilot / name
             safe_kwargs = _SafeFormatDict(kwargs)
+
+            # Map synonyms: pilot / name
             if "pilot" in kwargs and "name" not in kwargs:
                 safe_kwargs["name"] = kwargs["pilot"]
             elif "name" in kwargs and "pilot" not in kwargs:
@@ -109,6 +126,12 @@ def get(lang: str, key: str, **kwargs: Any) -> str:
                 safe_kwargs["level"] = kwargs["queue"]
             if "queues" in kwargs and "levels" not in kwargs:
                 safe_kwargs["levels"] = kwargs["queues"]
+
+            # Map lang / language synonyms
+            if "language" in kwargs and "lang" not in kwargs:
+                safe_kwargs["lang"] = kwargs["language"]
+            elif "lang" in kwargs and "language" not in kwargs:
+                safe_kwargs["language"] = kwargs["lang"]
 
             value = str(value).format_map(safe_kwargs)
         except Exception as e:
