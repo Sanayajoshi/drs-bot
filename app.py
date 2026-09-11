@@ -40,6 +40,11 @@ class DRSBot(commands.Bot):
 
         logger.info("Database connected.")
 
+        # Seed and sync i18n messages
+        from services.i18n import STRINGS, sync_from_db
+        self.db.seed_i18n_defaults(STRINGS)
+        sync_from_db(self.db)
+
         # Load all cogs
         cogs = [
             "cogs.setup_cog",
@@ -383,7 +388,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 

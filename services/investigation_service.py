@@ -622,4 +622,3 @@ class InvestigationService:
 
         embed.set_footer(text="DRS Bot Investigation System ┃ Network Safety & Conduct Analytics")
         return embed
-

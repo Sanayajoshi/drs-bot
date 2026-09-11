@@ -1,0 +1,6 @@
+{
+  "name": "DRS Queue Bot",
+  "description": "Multi-server Discord bot and live web monitor for Hades' Star Dark Red Star queues, matchmaking, and player incident investigations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

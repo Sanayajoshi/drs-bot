@@ -228,6 +228,16 @@ class DatabaseOperations:
             )""",
             "CREATE INDEX IF NOT EXISTS idx_se_guild ON server_emojis(guild_id)",
             "CREATE INDEX IF NOT EXISTS idx_se_emoji ON server_emojis(emoji_id)",
+            """CREATE TABLE IF NOT EXISTS i18n_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                lang        TEXT NOT NULL,
+                msg_key     TEXT NOT NULL,
+                text        TEXT NOT NULL,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_i18n_lang_key ON i18n_messages(lang, msg_key)",
+            "CREATE INDEX IF NOT EXISTS idx_i18n_active   ON i18n_messages(is_active)",
         ]
         with self.connection:
             for stmt in stmts:
@@ -349,6 +359,16 @@ class DatabaseOperations:
             "CREATE INDEX IF NOT EXISTS idx_se_guild ON server_emojis(guild_id)",
             "CREATE INDEX IF NOT EXISTS idx_se_emoji ON server_emojis(emoji_id)",
             "ALTER TABLE server_emojis ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0",
+            """CREATE TABLE IF NOT EXISTS i18n_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                lang        TEXT NOT NULL,
+                msg_key     TEXT NOT NULL,
+                text        TEXT NOT NULL,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_i18n_lang_key ON i18n_messages(lang, msg_key)",
+            "CREATE INDEX IF NOT EXISTS idx_i18n_active   ON i18n_messages(is_active)",
         ]
         for stmt in migrations:
             try:
@@ -1498,6 +1518,98 @@ class DatabaseOperations:
         """Return a mapping of guild_id to emoji_tag."""
         rows = self.get_all_server_emojis()
         return {r["guild_id"]: (r.get("emoji_tag") or fallback) for r in rows}
+
+    # ------------------------------------------------------------------
+    # i18n translations & variations
+    # ------------------------------------------------------------------
+
+    def get_i18n_messages(self, lang: str, msg_key: str) -> list[str]:
+        """Fetch all active message variations for a language and key."""
+        rows = self._execute(
+            "SELECT text FROM i18n_messages WHERE lang = ? AND msg_key = ? AND is_active = 1",
+            (lang, msg_key), fetch_all=True
+        )
+        if rows:
+            return [r["text"] for r in rows]
+        return []
+
+    def get_all_i18n_messages(self) -> dict[str, dict[str, list[str]]]:
+        """Fetch all active message variations mapped as {lang: {msg_key: [texts]}}."""
+        rows = self._execute(
+            "SELECT lang, msg_key, text FROM i18n_messages WHERE is_active = 1",
+            fetch_all=True
+        )
+        res: dict[str, dict[str, list[str]]] = {}
+        if rows:
+            for r in rows:
+                l = r["lang"]
+                k = r["msg_key"]
+                t = r["text"]
+                if l not in res:
+                    res[l] = {}
+                if k not in res[l]:
+                    res[l][k] = []
+                res[l][k].append(t)
+        return res
+
+    def add_i18n_message(self, lang: str, msg_key: str, text: str) -> bool:
+        """Add a custom message variation to the database."""
+        res = self._execute(
+            "INSERT INTO i18n_messages (lang, msg_key, text) VALUES (?, ?, ?)",
+            (lang, msg_key, text)
+        )
+        return res is not None
+
+    def seed_i18n_defaults(self, defaults_dict: dict[str, dict] | None = None):
+        """Populate database with default translations if empty or missing."""
+        if not self.connection:
+            return
+        if defaults_dict is None:
+            from services.i18n import STRINGS
+            defaults_dict = STRINGS
+        try:
+            count = self._execute("SELECT count(*) as cnt FROM i18n_messages", fetch_one=True)
+            if count and count["cnt"] > 0:
+                # Already populated; check if new keys need inserting
+                existing = self._execute("SELECT DISTINCT lang, msg_key FROM i18n_messages", fetch_all=True) or []
+                existing_set = {(r["lang"], r["msg_key"]) for r in existing}
+                new_params = []
+                for lang, keys in defaults_dict.items():
+                    for key, val in keys.items():
+                        if (lang, key) not in existing_set:
+                            if isinstance(val, list):
+                                for item in val:
+                                    new_params.append((lang, key, item))
+                            elif isinstance(val, str):
+                                new_params.append((lang, key, val))
+                if new_params:
+                    self.logger.info(f"Seeding {len(new_params)} new i18n variation rows...")
+                    self.connection.executemany(
+                        "INSERT INTO i18n_messages (lang, msg_key, text) VALUES (?, ?, ?)",
+                        new_params
+                    )
+                    self.connection.commit()
+                return
+
+            self.logger.info("Seeding i18n_messages table with default variations...")
+            params = []
+            for lang, keys in defaults_dict.items():
+                for key, val in keys.items():
+                    if isinstance(val, list):
+                        for item in val:
+                            params.append((lang, key, item))
+                    elif isinstance(val, str):
+                        params.append((lang, key, val))
+            if params:
+                self.connection.executemany(
+                    "INSERT INTO i18n_messages (lang, msg_key, text) VALUES (?, ?, ?)",
+                    params
+                )
+                self.connection.commit()
+                self.logger.info(f"Successfully seeded {len(params)} i18n variations into database!")
+        except Exception as e:
+            self.logger.error(f"Failed to seed i18n defaults: {e}", exc_info=True)
+
 
 
 

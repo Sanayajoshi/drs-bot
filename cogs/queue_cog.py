@@ -127,6 +127,7 @@ class QueueCog(commands.Cog):
             self._last_role_ping[ping_key] = now
 
         server_icon = self.bot.db.get_server_emoji_tag(queue_guild_id)
+        icon_prefix = f"{server_icon} " if server_icon else ""
 
         for srv in self.bot.db.get_all_servers():
             guild_id = srv["guild_id"]
@@ -143,7 +144,16 @@ class QueueCog(commands.Cog):
             role_id = full_srv.get(role_key)
             role_mention = f"<@&{role_id}> " if role_id else ""
 
-            line = f"{role_mention}{server_icon} **{display_name}** joined **{queue_type}{drs_level}** ({current}/{total})"
+            msg = t(
+                lang, "notify_joined",
+                icon=icon_prefix,
+                pilot=display_name,
+                name=display_name,
+                queue=f"{queue_type}{drs_level}",
+                count=f"({current}/{total})",
+                spots=total - current
+            )
+            line = f"{role_mention}{msg}" if role_mention else msg
             try:
                 await channel.send(line, silent=is_cooldown)
             except discord.Forbidden:
@@ -157,6 +167,7 @@ class QueueCog(commands.Cog):
 
     async def _notify_left(self, display_name: str, drs_level: int, queue_type: str = "DRS", guild_id: int = None):
         server_icon = self.bot.db.get_server_emoji_tag(guild_id)
+        icon_prefix = f"{server_icon} " if server_icon else ""
         for srv in self.bot.db.get_all_servers():
             g_id = srv["guild_id"]
             full_srv = self.bot.db.get_server(g_id)
@@ -166,8 +177,16 @@ class QueueCog(commands.Cog):
             channel = guild and guild.get_channel(full_srv["notification_channel_id"])
             if not channel:
                 continue
+            lang = full_srv.get("language", "en")
+            line = t(
+                lang, "notify_left",
+                icon=icon_prefix,
+                pilot=display_name,
+                name=display_name,
+                queue=f"{queue_type}{drs_level}"
+            )
             try:
-                await channel.send(f"🚪 {server_icon} **{display_name}** left **{queue_type}{drs_level}**.", silent=True)
+                await channel.send(line, silent=True)
             except discord.Forbidden:
                 pass
             except Exception as e:
@@ -175,6 +194,7 @@ class QueueCog(commands.Cog):
 
     async def _notify_left_all(self, display_name: str, queues_str: str, guild_id: int = None):
         server_icon = self.bot.db.get_server_emoji_tag(guild_id)
+        icon_prefix = f"{server_icon} " if server_icon else ""
         for srv in self.bot.db.get_all_servers():
             g_id = srv["guild_id"]
             full_srv = self.bot.db.get_server(g_id)
@@ -184,8 +204,16 @@ class QueueCog(commands.Cog):
             channel = guild and guild.get_channel(full_srv["notification_channel_id"])
             if not channel:
                 continue
+            lang = full_srv.get("language", "en")
+            line = t(
+                lang, "notify_left_all",
+                icon=icon_prefix,
+                pilot=display_name,
+                name=display_name,
+                queues=queues_str
+            )
             try:
-                await channel.send(f"🚪 {server_icon} **{display_name}** left **{queues_str}**.", silent=True)
+                await channel.send(line, silent=True)
             except discord.Forbidden:
                 pass
             except Exception as e:
@@ -196,6 +224,7 @@ class QueueCog(commands.Cog):
         current = len(queue)
         total   = config.DRS_MATCH_SIZE if queue_type == "DRS" else config.RS_MATCH_SIZE
         server_icon = self.bot.db.get_server_emoji_tag(guild_id)
+        icon_prefix = f"{server_icon} " if server_icon else ""
 
         for srv in self.bot.db.get_all_servers():
             g_id = srv["guild_id"]
@@ -214,7 +243,16 @@ class QueueCog(commands.Cog):
             ]
             user_mentions = " ".join(f"<@{p['discord_id']}>" for p in other_players_here) + " " if other_players_here else ""
 
-            line = f"⚡ {server_icon} {user_mentions}**{display_name}** enabled **Quick Start** for **{queue_type}{drs_level}**! ({current}/{total})"
+            lang = full_srv.get("language", "en")
+            line = t(
+                lang, "notify_qs",
+                icon=icon_prefix,
+                users=user_mentions,
+                pilot=display_name,
+                name=display_name,
+                queue=f"{queue_type}{drs_level}",
+                count=f"({current}/{total})"
+            )
             try:
                 await channel.send(line)
             except discord.Forbidden:
@@ -225,6 +263,7 @@ class QueueCog(commands.Cog):
     async def _notify_extended(self, display_name: str, level_str: str, target_guild_id: int = None):
         guilds = [target_guild_id] if target_guild_id else [s["guild_id"] for s in self.bot.db.get_all_servers()]
         server_icon = self.bot.db.get_server_emoji_tag(target_guild_id)
+        icon_prefix = f"{server_icon} " if server_icon else ""
         for guild_id in guilds:
             if not guild_id:
                 continue
@@ -235,8 +274,16 @@ class QueueCog(commands.Cog):
             channel = guild and guild.get_channel(full_srv["notification_channel_id"])
             if not channel:
                 continue
+            lang = full_srv.get("language", "en")
+            line = t(
+                lang, "notify_extend",
+                icon=icon_prefix,
+                pilot=display_name,
+                name=display_name,
+                queue=level_str
+            )
             try:
-                await channel.send(f"⏳ {server_icon} **{display_name}** extended their **{level_str}** slot by 30 minutes.", silent=True)
+                await channel.send(line, silent=True)
             except discord.Forbidden:
                 pass
             except Exception as e:
@@ -245,6 +292,7 @@ class QueueCog(commands.Cog):
     async def _notify_expiry_warning(self, discord_id: int, display_name: str, drs_level: int, queue_type: str = "DRS", target_guild_id: int = None):
         guilds = [target_guild_id] if target_guild_id else [s["guild_id"] for s in self.bot.db.get_all_servers()]
         server_icon = self.bot.db.get_server_emoji_tag(target_guild_id)
+        icon_prefix = f"{server_icon} " if server_icon else ""
         for guild_id in guilds:
             if not guild_id:
                 continue
@@ -258,7 +306,14 @@ class QueueCog(commands.Cog):
 
             lang = full_srv.get("language", "en")
             view = _build_expiry_extend_view(discord_id, drs_level, queue_type, lang)
-            content = f"⏰ {server_icon} <@{discord_id}> (**{display_name}**) — your **{queue_type}{drs_level}** queue slot expires in ~5 minutes! Tap ⏳ below to add 30 more."
+            content = t(
+                lang, "notify_expiry_warning",
+                icon=icon_prefix,
+                user_id=discord_id,
+                pilot=display_name,
+                name=display_name,
+                queue=f"{queue_type}{drs_level}"
+            )
             try:
                 await channel.send(content, view=view)
             except discord.Forbidden:
@@ -269,6 +324,7 @@ class QueueCog(commands.Cog):
     async def _notify_expired(self, discord_id: int, display_name: str, drs_level: int, queue_type: str = "DRS", target_guild_id: int = None):
         guilds = [target_guild_id] if target_guild_id else [s["guild_id"] for s in self.bot.db.get_all_servers()]
         server_icon = self.bot.db.get_server_emoji_tag(target_guild_id)
+        icon_prefix = f"{server_icon} " if server_icon else ""
         for guild_id in guilds:
             if not guild_id:
                 continue
@@ -279,7 +335,15 @@ class QueueCog(commands.Cog):
             channel = guild and guild.get_channel(full_srv["notification_channel_id"])
             if not channel:
                 continue
-            content = f"⏰ {server_icon} <@{discord_id}> (**{display_name}**) — your spot in **{queue_type}{drs_level}** has expired. Tap a number on the queue message to jump back in!"
+            lang = full_srv.get("language", "en")
+            content = t(
+                lang, "notify_expired",
+                icon=icon_prefix,
+                user_id=discord_id,
+                pilot=display_name,
+                name=display_name,
+                queue=f"{queue_type}{drs_level}"
+            )
             try:
                 await channel.send(content)
             except discord.Forbidden:
@@ -318,9 +382,13 @@ class QueueCog(commands.Cog):
             if not channel:
                 continue
 
+            lang = full_srv.get("language", "en")
+            title = t(lang, "notify_match_formed_title", queue=queue_type, level=drs_level, match_id=match_id)
+            desc = t(lang, "notify_match_formed_desc", queue=f"{queue_type}{drs_level}", duration=queue_time_str, roster=roster_str)
+
             embed = discord.Embed(
-                title=f"⚔️ {queue_type} Level {drs_level} Formed! (Match #{match_id})",
-                description=f"⏱️ **Queue formed in:** {queue_time_str}\n\n**Roster:**\n{roster_str}",
+                title=title,
+                description=desc,
                 color=discord.Color.gold() if queue_type == "RS" else discord.Color.red()
             )
 
@@ -433,6 +501,9 @@ class QueueCog(commands.Cog):
         self.bot.db.upsert_user(discord_id, display_name)
         self.bot.db.upsert_user_server(discord_id, guild_id, display_name)
 
+        srv = self.bot.db.get_server(guild_id) or {}
+        lang = srv.get("language", "en")
+
         # Levels 4, 5, 6 are strictly RS. Levels 7-12 depend on user queue mode.
         if level in [4, 5, 6]:
             queue_type = "RS"
@@ -442,9 +513,8 @@ class QueueCog(commands.Cog):
         if self.bot.db.is_user_queued_for_level(discord_id, level, queue_type):
             self.bot.db.leave_queue_level(discord_id, level, queue_type)
             self._warned.discard((discord_id, level))
-            await interaction.followup.send(
-                f"👋 Left **{queue_type}{level}** queue.", ephemeral=True
-            )
+            msg = t(lang, "ephemeral_left", queue=f"{queue_type}{level}")
+            await interaction.followup.send(msg, ephemeral=True)
             await self._notify_left(display_name, level, queue_type, guild_id=guild_id)
             await self._push_queue_update()
             return
@@ -452,12 +522,12 @@ class QueueCog(commands.Cog):
         result = await self.queue_service.join(discord_id, display_name, level, guild_id, queue_type=queue_type)
 
         if result == "match_formed":
-            await interaction.followup.send(f"🔥 **{queue_type}{level}** match found!", ephemeral=True)
+            msg = t(lang, "match_formed", queue=f"{queue_type}{level}")
+            await interaction.followup.send(msg, ephemeral=True)
         else:
             queue = self.bot.db.get_queue_for_level(level, queue_type=queue_type)
-            await interaction.followup.send(
-                f"✅ Joined **{queue_type}{level}** queue! Timer set for 30m.", ephemeral=True
-            )
+            msg = t(lang, "ephemeral_joined", queue=f"{queue_type}{level}")
+            await interaction.followup.send(msg, ephemeral=True)
             await self._notify_joined(discord_id, display_name, level, queue_type, queue_guild_id=guild_id)
 
         await self._push_queue_update()
@@ -470,6 +540,8 @@ class QueueCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         discord_id = interaction.user.id
         display_name = interaction.user.display_name
+        srv = self.bot.db.get_server(interaction.guild_id) or {}
+        lang = srv.get("language", "en")
 
         user_queues = self.bot.db.get_user_queue_levels(discord_id)
         if user_queues:
@@ -479,11 +551,13 @@ class QueueCog(commands.Cog):
 
             queues_str = ", ".join(f"{q.get('queue_type', 'DRS')}{q['drs_level']}" for q in user_queues)
             self.bot.db.eject_player_from_all_queues(discord_id, reason="user_exit")
-            await interaction.followup.send("🚪 You have exited all active queues.", ephemeral=True)
+            msg = t(lang, "ephemeral_left_all")
+            await interaction.followup.send(msg, ephemeral=True)
             await self._notify_left_all(display_name, queues_str, guild_id=interaction.guild_id)
         else:
             self.bot.db.eject_player_from_all_queues(discord_id, reason="user_exit")
-            await interaction.followup.send("🚪 You are not in any active queues.", ephemeral=True)
+            msg = t(lang, "not_in_queue")
+            await interaction.followup.send(msg, ephemeral=True)
 
         await self._push_queue_update()
 
@@ -495,10 +569,13 @@ class QueueCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         discord_id   = interaction.user.id
         display_name = interaction.user.display_name
+        srv = self.bot.db.get_server(interaction.guild_id) or {}
+        lang = srv.get("language", "en")
 
         user_queues = self.bot.db.get_user_queue_levels(discord_id)
         if not user_queues:
-            await interaction.followup.send("🤔 You are not in any queue right now.", ephemeral=True)
+            msg = t(lang, "not_in_queue")
+            await interaction.followup.send(msg, ephemeral=True)
             return
 
         self.bot.db.extend_queue(discord_id, minutes=config.EXTEND_MINS)
@@ -507,9 +584,8 @@ class QueueCog(commands.Cog):
             self._warned.discard((discord_id, q["drs_level"]))
 
         q_names = ", ".join(f"{q.get('queue_type', 'DRS')}{q['drs_level']}" for q in user_queues)
-        await interaction.followup.send(
-            f"⏳ Added 30 minutes to your active queue slot(s) (**{q_names}**)!", ephemeral=True
-        )
+        msg = t(lang, "ephemeral_extended", queues=q_names)
+        await interaction.followup.send(msg, ephemeral=True)
         await self._notify_extended(display_name, q_names, target_guild_id=interaction.guild_id)
         await self._push_queue_update()
 
@@ -521,15 +597,15 @@ class QueueCog(commands.Cog):
         target_id = int(parts[2])
         level = int(parts[3])
         queue_type = parts[4] if len(parts) > 4 else "DRS"
+        srv = self.bot.db.get_server(interaction.guild_id) or {}
+        lang = srv.get("language", "en")
 
         if interaction.user.id != target_id:
-            await interaction.response.send_message("🤔 This extend button isn't for you.", ephemeral=True)
+            await interaction.response.send_message(t(lang, "expiry_not_yours"), ephemeral=True)
             return
 
         if not self.bot.db.is_user_queued_for_level(target_id, level, queue_type):
-            await interaction.response.send_message(
-                f"❌ Your slot in **{queue_type}{level}** has already expired or you left the queue.", ephemeral=True
-            )
+            await interaction.response.send_message(t(lang, "not_in_queue"), ephemeral=True)
             try:
                 await interaction.message.edit(view=None)
             except Exception:
@@ -541,7 +617,7 @@ class QueueCog(commands.Cog):
         self._warned.discard((target_id, level))
 
         await interaction.response.send_message(
-            f"✅ Added 30 minutes to your **{queue_type}{level}** queue!", ephemeral=True
+            t(lang, "expiry_extended_ok", queue=f"{queue_type}{level}"), ephemeral=True
         )
 
         try:
@@ -560,13 +636,15 @@ class QueueCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         discord_id = interaction.user.id
         queue_type = self.bot.db.get_user_queue_mode(discord_id)
+        srv = self.bot.db.get_server(interaction.guild_id) or {}
+        lang = srv.get("language", "en")
 
         # Find level player is currently in for this queue_type
         full_q = self.bot.db.get_full_queue()
         user_entries = [e for e in full_q if e["discord_id"] == discord_id and e.get("queue_type", "DRS") == queue_type]
 
         if not user_entries:
-            await interaction.followup.send(f"❓ You are not in any **{queue_type}** queue.", ephemeral=True)
+            await interaction.followup.send(t(lang, "qs_not_queued"), ephemeral=True)
             return
 
         drs_level = user_entries[0]["drs_level"]
@@ -574,9 +652,9 @@ class QueueCog(commands.Cog):
 
         res = await self.queue_service.check_quick_start(drs_level, queue_type=queue_type)
         if res == "match_formed":
-            await interaction.followup.send(f"⚡ Quick Start triggered! **{queue_type}{drs_level}** match formed!", ephemeral=True)
+            await interaction.followup.send(t(lang, "qs_confirmed", queue=f"{queue_type}{drs_level}"), ephemeral=True)
         else:
-            await interaction.followup.send(f"▶️ Quick Start enabled for **{queue_type}{drs_level}**.", ephemeral=True)
+            await interaction.followup.send(t(lang, "ephemeral_qs", queue=f"{queue_type}{drs_level}"), ephemeral=True)
             await self._notify_quickstart(discord_id, interaction.user.display_name, drs_level, queue_type=queue_type, guild_id=interaction.guild_id)
 
         await self._push_queue_update()
@@ -590,16 +668,16 @@ class QueueCog(commands.Cog):
         discord_id   = interaction.user.id
         display_name = interaction.user.display_name
         guild_id     = interaction.guild_id
+        srv = self.bot.db.get_server(guild_id) or {}
+        lang = srv.get("language", "en")
 
         self.bot.db.upsert_user(discord_id, display_name)
         if guild_id:
             self.bot.db.upsert_user_server(discord_id, guild_id, display_name)
 
         new_status = self.bot.db.toggle_need_assist(discord_id)
-        status_text = "ENABLED 🆘" if new_status else "DISABLED ❌"
-        await interaction.followup.send(
-            f"Need Assist status is now **{status_text}**.", ephemeral=True
-        )
+        msg = t(lang, "ephemeral_assist_on" if new_status else "ephemeral_assist_off")
+        await interaction.followup.send(msg, ephemeral=True)
         await self._push_queue_update()
 
     # ------------------------------------------------------------------

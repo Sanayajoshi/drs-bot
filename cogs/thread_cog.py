@@ -128,7 +128,7 @@ class ThreadCog(commands.Cog):
                 )
                 bell_view = self.thread_service.build_bell_view(match_id)
 
-                proceed = t(lang, "match_proceed", level=drs_level)
+                proceed = t(lang, "match_proceed", queue=f"{queue_type}{drs_level}", level=drs_level)
 
                 # Build bonus embed if there are active bonuses
                 bonus_embed = self._build_bonus_embed(lang)
@@ -175,12 +175,11 @@ class ThreadCog(commands.Cog):
         queue_duration_seconds: int = 0,
         id_to_emoji: dict[int, str] | None = None,
     ) -> discord.Embed:
-        if queue_type == "RS":
-            title = f"🔴 Red Star {drs_level} — Match #{match_id}"
-            color = discord.Color.red()
-        else:
-            title = t(lang, "match_title", level=drs_level, match_id=match_id)
-            color = discord.Color.dark_red()
+        prefix = "🔴" if queue_type == "RS" else "⭐"
+        color = discord.Color.red() if queue_type == "RS" else discord.Color.dark_red()
+        title = t(lang, "match_title", queue=f"{queue_type}{drs_level}", level=drs_level, match_id=match_id)
+        if not title.startswith("⭐") and not title.startswith("🔴"):
+            title = f"{prefix} {title}"
 
         queue_time_str = format_duration(queue_duration_seconds)
         embed = discord.Embed(

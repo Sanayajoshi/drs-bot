@@ -82,7 +82,7 @@ def build_queue_embeds(
 
     # 1. Dark Red Star Queue Embed
     drs_embed = discord.Embed(
-        title=f"{DRS_ICON} Dark Red Star Queue",
+        title=f"{DRS_ICON} {t(lang, 'queue_title_drs')}",
         color=discord.Color.dark_red(),
         description=activity_header if activity_header else None
     )
@@ -122,7 +122,7 @@ def build_queue_embeds(
         )
 
     if not has_drs:
-        drs_embed.description = (activity_header if activity_header else "") + "*No pilots in Dark Red Star queue.*"
+        drs_embed.description = (activity_header if activity_header else "") + t(lang, "queue_empty_drs")
 
     # Add random Hint section
     hint_idx = random.randint(0, len(HINTS) - 1)
@@ -137,7 +137,7 @@ def build_queue_embeds(
 
     # 2. Red Star Queue Embed (only shown when there is a player in RS queue)
     rs_embed = discord.Embed(
-        title=f"{RS_ICON} Red Star Queue",
+        title=f"{RS_ICON} {t(lang, 'queue_title_rs')}",
         color=discord.Color.red(),
         description=activity_header if activity_header else None
     )
@@ -800,9 +800,14 @@ class QueueModeSettingsView(discord.ui.View):
             pass
 
 
-def _format_remaining(expires_at: datetime) -> str:
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
-    if expires_at.tzinfo is None:
+def _format_remaining(expires_at) -> str:
+    if isinstance(expires_at, str):
+        from db.database import _parse_dt
+        expires_at = _parse_dt(expires_at)
+    if not expires_at:
+        return "0m"
+    now = datetime.now(timezone.utc)
+    if getattr(expires_at, "tzinfo", None) is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     delta = expires_at - now
     if delta.total_seconds() <= 0:

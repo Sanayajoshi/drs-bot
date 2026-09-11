@@ -7,19 +7,112 @@ _11_EMOJI = "<:11:1378449282688090184>"
 _12_EMOJI = "<:12:1519933592401215570>"
 
 STRINGS: dict = {
+    # Pinned Queue Embed Titles & Texts
+    "queue_title_drs": "Dunkler Roter Stern — Warteschlange",
+    "queue_title_rs": "Roter Stern — Warteschlange",
+    "queue_empty_drs": "*Keine Piloten im Hangar. Tippe unten auf eine Stufe zum Starten!*",
+    "queue_empty_rs": "*Keine Piloten in der Roter-Stern-Warteschlange. Wähle unten eine Stufe für die Flotte!*",
     "queue_title": "⭐ Dunkler Roter Stern — Warteschlange",
     "queue_empty": "*Keine Piloten. Drück eine Zahl zum Beitreten!*",
     "queue_footer": "Aktualisiert jede Minute · Tippe eine Stufe zum Beitreten/Verlassen",
     "queue_legend": f"> -# `Queue umschalten`: 7️⃣–{_12_EMOJI}\n> -# `Queue verlassen `: ❌\n> -# `Tech setzen     `: {GEN_EMOJI} {ENR_EMOJI} {RSE_EMOJI}\n> -# `Zeit(30m)       `: ⏳\n> -# `Duo-Start       `: ▶️",
+
+    # Channel Notifications (Broadcasts)
+    "notify_joined": [
+        "{icon}**{pilot}** hat sich in **{queue}** {count} eingeklinkt! Triebwerke vorgeheizt, warte auf Sprungkoordinaten.",
+        "{icon}Pilot **{pilot}** meldet sich im Hangar für **{queue}** {count}! Waffensysteme aktiv!",
+        "{icon}Signal erfasst: **{pilot}** betritt den Bereitstellungsraum für **{queue}** {count}. Wer springt mit?",
+        "{icon}**{pilot}** auf dem Flugdeck für **{queue}** {count}. Warpspule lädt!",
+        "{icon}Flottenliste aktualisiert: **{pilot}** ist **{queue}** {count} beigetreten. Ziel erfasst!",
+        "{icon}**{pilot}** sitzt im Cockpit für **{queue}** {count}. Gefechtsstationen, Piloten!",
+    ],
+    "notify_left": [
+        "🚪 {icon}**{pilot}** hat **{queue}** verlassen. Rückkehr zu den Stationsdocks.",
+        "🚪 {icon}**{pilot}** hat die Bereitschaft für **{queue}** beendet. Triebwerke abgeschaltet.",
+        "🚪 {icon}**{pilot}** bricht Sprungvorbereitung für **{queue}** ab. Startbahn frei.",
+        "🚪 {icon}Pilot **{pilot}** wurde aus **{queue}** in den Hangar zurückgerufen.",
+        "🚪 {icon}Flugplan storniert: **{pilot}** hat **{queue}** freigegeben.",
+    ],
+    "notify_left_all": [
+        "🚪 {icon}**{pilot}** hat alle Flugpläne ({queues}) gelöscht und Dienstschluss gemacht.",
+        "🚪 {icon}**{pilot}** hat alle Schiffe heruntergefahren und alle Queues ({queues}) verlassen.",
+        "🚪 {icon}Flugbereitschaft für **{pilot}** ({queues}) aufgehoben. Schönen Feierabend!",
+    ],
+    "notify_qs": [
+        "⚡ {icon}{users}**{pilot}** hat **Schnellstart** für **{queue}** {count} aktiviert! Bereit zum Drop ab 2+ Piloten!",
+        "⚡ {icon}{users}Overdrive aktiv! **{pilot}** will in **{queue}** {count} keine Zeit verlieren — abflugbereit!",
+        "⚡ {icon}{users}**{pilot}** hat den Schnellstart-Button für **{queue}** {count} betätigt! Triebwerke hochfahren!",
+    ],
+    "notify_extend": [
+        "⏳ {icon}**{pilot}** hat nachgetankt: +30 Minuten für den Slot in **{queue}** gebucht!",
+        "⏳ {icon}**{pilot}** holt noch einen Weltraumkaffee — bleibt für weitere 30m in **{queue}**!",
+        "⏳ {icon}Lebenserhaltung verlängert: **{pilot}** bucht +30 Minuten für **{queue}**.",
+    ],
+    "notify_assist": [
+        "🆘 {icon}Pilot **{pilot}** hat eine Notfackel gezündet! Eskorte gesucht!",
+        "🆘 {icon}**{pilot}** bittet um Flottenunterstützung & Geleitschutz! Veteranen gesucht!",
+        "🆘 {icon}Flottenfunk: **{pilot}** hat **Need Assist** aktiviert! Wer fliegt Geleitschutz?",
+    ],
+    "notify_expiry_warning": [
+        "⚠️ {icon}<@{user_id}> (**{pilot}**), dein Zeitfenster für **{queue}** läuft in **5 Minuten** ab! Tippe ⏳ unten zur Verlängerung!",
+        "⚠️ {icon}Warnleuchten blinken: Der Slot von <@{user_id}> (**{pilot}**) in **{queue}** verfällt in **5 Minuten**! Tippe ⏳!",
+        "⚠️ {icon}Flugkontrolle an <@{user_id}> (**{pilot}**): Hangarplatz in **{queue}** läuft in 5 Minuten ab! Bestätige Bereitschaft oder tippe ⏳!",
+    ],
+    "notify_expired": [
+        "⏰ {icon}<@{user_id}> (**{pilot}**) ist aus der Sensorreichweite gedriftet — wegen Inaktivität aus **{queue}** entfernt.",
+        "⏰ {icon}Hangarzeit für <@{user_id}> (**{pilot}**) in **{queue}** abgelaufen. Slot wieder frei!",
+        "⏰ {icon}Radarkontakt zu <@{user_id}> (**{pilot}**) verloren. Bereitschaft für **{queue}** storniert.",
+    ],
+    "notify_match_formed_title": [
+        "⚔️ {queue} Stufe {level} Flotte gebildet! (Match #{match_id})",
+        "🚀 Flotte versammelt: {queue}{level}! (Match #{match_id})",
+        "💥 Gefechtsgruppe bereit: {queue}{level}! (Match #{match_id})",
+    ],
+    "notify_match_formed_desc": [
+        "⏱️ **Gebildet in:** {duration}\n\n**Piloten an Deck:**\n{roster}\n\n🛰️ *Sprungkoordinaten erfasst! Schau in den Match-Thread für Details!*",
+        "⏱️ **Bereitstellungszeit:** {duration}\n\n**Geschwader:**\n{roster}\n\n🔥 *Waffen scharf, Schilde aktiv. Auf in den Match-Thread!*",
+    ],
+
+    # Personal Ephemeral Responses
+    "ephemeral_joined": [
+        "✅ In **{queue}** eingeklinkt! Countdown läuft (30m). Schnall dich an!",
+        "✅ Starterlaubnis für **{queue}** erteilt (30 Min. gültig).",
+        "✅ Cockpit verriegelt! Du stehst für **{queue}** bereit (30m).",
+    ],
+    "ephemeral_left": [
+        "👋 Von **{queue}** abgemeldet. Hangartore geöffnet.",
+        "👋 Aus **{queue}** ausgetragen. Gute Erholung, Pilot!",
+        "👋 Slot in **{queue}** freigegeben.",
+    ],
+    "ephemeral_left_all": [
+        "🚪 Alle aktiven Warteschlangen verlassen. Startbahnen frei.",
+        "🚪 Schiffe heruntergefahren. Du hast alle Queues verlassen.",
+    ],
+    "ephemeral_extended": [
+        "⏳ Slot(s) (**{queues}**) um +30 Minuten verlängert! Warpspule hält.",
+        "⏳ +30 Minuten zu **{queues}** hinzugefügt! Zeit genug zum Auftanken.",
+    ],
+    "ephemeral_qs": [
+        "⚡ Schnellstart für **{queue}** aktiviert! Start ab 2+ Piloten.",
+        "⚡ Overdrive aktiv auf **{queue}**! Sofortstart-Modus scharf.",
+    ],
+    "ephemeral_assist_on": [
+        "🆘 Hilferuf aktiviert (**EIN**)! Notfall-Signal leuchtet in der Warteschlange.",
+    ],
+    "ephemeral_assist_off": [
+        "✅ Hilferuf deaktiviert (**AUS**). Standard-Flugmodus aktiv.",
+    ],
+
+    # Legacy & Modals
     "joined": [
-        "✅ Du bist in **DRS{level}** eingetragen! Zeit: {time}\n📋 Aktive Queues: **{levels}**",
-        "🚀 **DRS{level}** bestätigt! Timer: {time}.\n📋 In Warteschlange: **{levels}**",
+        "✅ Du bist in **{queue}** eingetragen! Zeit: {time}\n📋 Aktive Queues: **{levels}**",
+        "🚀 **{queue}** bestätigt! Timer: {time}.\n📋 In Warteschlange: **{levels}**",
     ],
     "left_level": [
-        "👋 Du hast **DRS{level}** verlassen. Noch dabei: **{levels}**",
+        "👋 Du hast **{queue}** verlassen. Noch dabei: **{levels}**",
     ],
     "left_level_all_gone": [
-        "👋 **DRS{level}** verlassen — keine aktiven Queues mehr.",
+        "👋 **{queue}** verlassen — keine aktiven Queues mehr.",
     ],
     "left_all": [
         "🚪 Alle Queues verlassen ({levels}). Bis zum nächsten Mal!",
@@ -29,106 +122,68 @@ STRINGS: dict = {
     ],
     "extended": [
         "⏳ Deine Queues {levels} um **{mins} Min** verlängert!",
-        "🕐 +{mins} Min zu {levels} hinzugefügt!",
     ],
     "match_formed": [
-        "🔥 **DRS{level}** Match gefunden! Schau in den Thread.",
-        "⚡ Squad für **DRS{level}** bereit! Thread ist live.",
+        "🔥 **{queue}** Match gefunden! Schau in den Thread.",
     ],
     "qs_not_queued": [
-        "❓ Du bist in keiner Queue. Tritt erst einem DRS-Level bei!",
+        "❓ Du bist in keiner Queue. Tritt erst bei!",
     ],
     "qs_multi_queue": [
         "⚠️ Du bist in mehreren Queues ({levels}). Verlasse alle außer einer für ▶️.",
     ],
     "qs_alone": [
-        "🧍 Du bist allein in **DRS{level}**. Mindestens 2 Spieler nötig!",
+        "🧍 Du bist allein in **{queue}**. Mindestens 2 Spieler nötig!",
     ],
     "qs_already": [
         "⏳ Du hast bereits ▶️ gedrückt. Warte auf den anderen Spieler.",
     ],
     "qs_confirmed": [
-        "🚀 Schnellstart bestätigt! **DRS{level}** startet! Schau in den Thread.",
+        "🚀 Schnellstart bestätigt! **{queue}** startet!",
     ],
     "qs_sent": [
-        "▶️ Schnellstart für **DRS{level}** angefragt! Warte auf Bestätigung.",
+        "▶️ Schnellstart für **{queue}** angefragt! Warte auf Bestätigung.",
     ],
     "mod_set": [
         "✅ **{mod}** auf Stufe **{level}** gesetzt.",
-        "💾 **{mod}** → **{level}** gespeichert!",
     ],
     "mod_prompt": "Dein aktuelles **{mod}**-Level: **{current}**\nWähle das neue Level:",
     "mod_not_set": "nicht gesetzt",
-    "notify_left": [
-        "👋 **{name}** hat die **DRS{level}**-Queue verlassen.",
-        "🚪 **{name}** ist aus **DRS{level}** ausgetreten.",
-    ],
-    "notify_extend": [
-        "⏳ {role}**{name}** hat den **DRS{level}**-Slot um 30 Minuten verlängert.",
-        "🕐 {role}**{name}** hat **DRS{level}** aufgefrischt — noch 30 Minuten!",
-    ],
     "expiry_warning": [
-        "⏰ **{name}** — dein **DRS{level}**-Slot läuft in ~5 Minuten ab! Drücke ⏳ für +30 Min.",
-        "🚨 **{name}** — DRS{level} Timer läuft fast ab! Jetzt verlängern oder rausfliegen.",
+        "⏰ **{name}** — dein Platz in **{queue}** läuft in ~5 Minuten ab! Tippe ⏳ zum Verlängern.",
     ],
     "expiry_extend_prompt": "⏳ +30 Min",
-    "expiry_extended_ok": "✅ 30 Minuten zu deiner **DRS{level}**-Queue hinzugefügt!",
+    "expiry_extended_ok": "✅ 30 Minuten zu deiner **{queue}**-Queue hinzugefügt!",
     "expiry_not_yours": "🤔 Dieser Button ist nicht für dich.",
     "match_proceed": [
-        "✅ **DRS{level}** Match bereit — bitte los! Viel Erfolg Piloten 🚀",
-        "🚀 **DRS{level}** Squad komplett — wenn ihr bereit seid, rein da!",
+        "✅ **{queue}** Match komplett — guten Flug Piloten! 🚀",
     ],
-    "notify_match_formed": [
-        "✅ **DRS{level}** Match gebildet — {size}/{size} Piloten. Queue zurückgesetzt!",
-    ],
-    "notify_joined_title": "📡 Pilot eingetroffen — DRS{level}",
-    "notify_joined": [
-        "**{name}** hat sich für **DRS{level}** angemeldet! {spots} Platz/Plätze frei — wer kommt mit?",
-        "🚀 **{name}** ist bereit für **DRS{level}**! {spots} Slot(s) verfügbar.",
-        "⚡ **{name}** in der DRS{level}-Queue. Noch {spots} gesucht!",
-        "🎯 **{name}** eingetragen für **DRS{level}**. {spots} Platz/Plätze offen.",
-        "🌟 **{name}** in **DRS{level}**. Noch {spots} Pilot(en) gesucht!",
-        "📻 Neuer Pilot! **{name}** für **DRS{level}** — {spots} Platz/Plätze frei.",
-        "💫 **{name}** will **DRS{level}** fliegen! {spots} Slot(s) offen.",
-        "🛸 **{name}** angemeldet für **DRS{level}**. Noch {spots} zum Start!",
-        "🔥 **{name}** in **DRS{level}**. {spots} Platz/Plätze frei.",
-        "⭐ **{name}** wartet in **DRS{level}**. {spots} Slot(s) verfügbar!",
-    ],
-    "notify_qs_title": "▶️ Schnellstart — DRS{level}",
-    "notify_qs": [
-        "**{name}** möchte **DRS{level}** zu zweit starten! Drücke ▶️ zum Bestätigen.",
-        "🚀 **{name}** schlägt einen 2-Spieler-Run für **DRS{level}** vor! ▶️ drücken!",
-    ],
-    "match_title": "⭐ Dunkler Roter Stern {level} — Match #{match_id}",
-    "match_footer": "Viel Erfolg — mögen die Sterne mit euch sein! 🌟",
+    "match_title": "⭐ {queue} — Match #{match_id}",
+    "match_footer": "Viel Erfolg — mögen die Sterne günstig stehen 🌟",
     "match_warning": [
-        "⚡ **{names}** — Tech einstellen vor dem Start!",
-        "⚠️ **{names}** — Tech-Daten fehlen. Vor dem Start eintragen!",
+        "⚡ **{names}** — rüste deine Module aus, bevor es losgeht!",
     ],
     "match_warning_multi": [
-        "⚠️ **{names}** — Tech-Daten fehlen. Bitte vor dem Start eintragen!",
+        "⚡ **{names}** — rüste deine Module aus, bevor es losgeht!",
     ],
-    "feedback_prompt": "🏁 Wie war der DRS-Run?",
+    "feedback_prompt": "🏁 Wie war der Flug?",
     "feedback_thanks": [
-        "Danke für dein Feedback! 🌌",
-        "Notiert! 🚀",
-        "Feedback erhalten — danke! ⭐",
+        "Danke für das Feedback! 🌌",
     ],
     "feedback_not_participant": "❌ Nur Match-Teilnehmer können Feedback geben.",
     "feedback_already_submitted": "✅ Du hast bereits Feedback für dieses Match abgegeben.",
-    "feedback_no_others": "🤔 Keine anderen Spieler zum Melden in diesem Match.",
-    "feedback_select_player": "Wen möchtest du melden? Wähle einen Spieler aus:",
-    "feedback_error": "❌ Feedback konnte nicht gespeichert werden. Nochmal versuchen?",
+    "feedback_no_others": "🤔 Keine anderen Spieler in diesem Match zu melden.",
+    "feedback_select_player": "Wen möchtest du melden? Wähle unten einen Spieler:",
+    "feedback_error": "❌ Konnte Feedback nicht speichern. Erneut versuchen?",
     "report_thanks": [
-        "✅ Meldung für **{name}** eingereicht. Offiziere wurden benachrichtigt.",
-        "📋 **{name}** wurde zur Überprüfung markiert.",
+        "✅ Meldung für **{name}** eingereicht. Die Offiziere wurden benachrichtigt.",
     ],
-    "officer_alert_title": "⚠️ Negativbericht",
-    "setup_success_title": "✅ DRS Bot Konfiguriert",
-    "setup_footer": "Queue-Nachricht im Queue-Kanal gepostet.",
+    "officer_alert_title": "⚠️ Negativer Spielbericht",
+    "setup_success_title": "✅ Bot Konfiguriert",
+    "setup_footer": "Queue-Nachricht im Kanal gepostet.",
     "setup_roles_success": "✅ Ping-Rollen aktualisiert!",
-    "setup_no_auth": "❌ Du benötigst Administratorrechte oder die Manager-Rolle.",
-    "status_not_setup": "⚠️ Noch nicht konfiguriert. Führe `/drs setup` aus.",
-    "status_title": "DRS Bot — Server-Konfiguration",
+    "setup_no_auth": "❌ Administratorrechte oder Manager-Rolle erforderlich.",
+    "status_not_setup": "⚠️ Noch nicht konfiguriert. Führe zuerst `/drs setup` aus.",
+    "status_title": "Queue Bot — Serverkonfiguration",
     "lang_set": "✅ Sprache auf **{lang}** gesetzt.",
 }
