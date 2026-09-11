@@ -42,7 +42,17 @@ class DRSBot(commands.Bot):
 
         # Seed and sync i18n messages
         from services.i18n import STRINGS, sync_from_db
-        self.db.seed_i18n_defaults(STRINGS)
+        notification_keys = [
+            "notify_joined",
+            "notify_left",
+            "notify_left_all",
+            "notify_qs",
+            "notify_extend",
+            "notify_assist",
+            "notify_expiry_warning",
+            "notify_expired",
+        ]
+        self.db.seed_i18n_defaults(STRINGS, refresh_keys=notification_keys)
         sync_from_db(self.db)
 
         # Load all cogs

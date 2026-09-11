@@ -1560,14 +1560,40 @@ class DatabaseOperations:
         )
         return res is not None
 
-    def seed_i18n_defaults(self, defaults_dict: dict[str, dict] | None = None):
-        """Populate database with default translations if empty or missing."""
+    def seed_i18n_defaults(
+        self,
+        defaults_dict: dict[str, dict] | None = None,
+        refresh_keys: list[str] | None = None
+    ):
+        """Populate database with default translations if empty or missing, and refresh specified keys."""
         if not self.connection:
             return
         if defaults_dict is None:
             from services.i18n import STRINGS
             defaults_dict = STRINGS
         try:
+            # If refresh_keys or legacy phrases are targeted, update those keys
+            if refresh_keys:
+                self.logger.info(f"Refreshing i18n keys in database table: {refresh_keys}")
+                for rk in refresh_keys:
+                    self.connection.execute("DELETE FROM i18n_messages WHERE msg_key = ?", (rk,))
+                refreshed_params = []
+                for lang, keys in defaults_dict.items():
+                    for rk in refresh_keys:
+                        if rk in keys:
+                            val = keys[rk]
+                            if isinstance(val, list):
+                                for item in val:
+                                    refreshed_params.append((lang, rk, item))
+                            elif isinstance(val, str):
+                                refreshed_params.append((lang, rk, val))
+                if refreshed_params:
+                    self.connection.executemany(
+                        "INSERT INTO i18n_messages (lang, msg_key, text) VALUES (?, ?, ?)",
+                        refreshed_params
+                    )
+                self.connection.commit()
+
             count = self._execute("SELECT count(*) as cnt FROM i18n_messages", fetch_one=True)
             if count and count["cnt"] > 0:
                 # Already populated; check if new keys need inserting
