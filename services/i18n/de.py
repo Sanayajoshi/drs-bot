@@ -19,36 +19,35 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** ist **{queue}** {count} beigetreten",
-        "{icon}**{pilot}** in **{queue}** {count} eingeklinkt",
-        "{icon}**{pilot}** bereit für **{queue}** {count}",
+        "{icon}Pilot **{pilot}** ist **{queue}** {count} beigetreten · Startbereit",
+        "{icon}Pilot **{pilot}** ist **{queue}** {count} beigetreten · Auf dem Flugdeck",
+        "{icon}Pilot **{pilot}** ist **{queue}** {count} beigetreten · Systeme aktiv",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** hat **{queue}** verlassen",
-        "🚪 {icon}**{pilot}** aus **{queue}** ausgetragen",
+        "🚪 {icon}Pilot **{pilot}** hat **{queue}** verlassen · Abgedockt",
+        "🚪 {icon}Pilot **{pilot}** hat **{queue}** verlassen · Rückkehr zur Station",
+        "🚪 {icon}Pilot **{pilot}** hat **{queue}** verlassen · Standby abgebrochen",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** hat alle Queues verlassen ({queues})",
-        "🚪 {icon}**{pilot}** ist aus allen Queues ausgetragen ({queues})",
+        "🚪 {icon}Pilot **{pilot}** hat alle Queues verlassen ({queues}) · Rückkehr zur Station",
+        "🚪 {icon}Pilot **{pilot}** hat alle Queues verlassen ({queues}) · Flugplan gelöscht",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** hat Schnellstart für **{queue}** {count} aktiviert",
-        "⚡ {icon}{users}**{pilot}** will Schnellstart für **{queue}** {count}",
+        "⚡ {icon}{users}Pilot **{pilot}** hat Schnellstart für **{queue}** {count} aktiviert",
+        "⚡ {icon}{users}Pilot **{pilot}** hat Schnellstart für **{queue}** {count} angefordert",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** hat **{queue}** verlängert (+30m)",
-        "⏳ {icon}**{pilot}** +30m für **{queue}** gebucht",
+        "⏳ {icon}Pilot **{pilot}** hat Flugslot für **{queue}** verlängert (+30m)",
     ],
     "notify_assist": [
-        "🆘 {icon}**{pilot}** bittet um Unterstützung für **{queue}**",
-        "🆘 {icon}**{pilot}** sucht Geleitschutz für **{queue}**",
+        "🆘 {icon}Pilot **{pilot}** bittet um Flotteneskorte für **{queue}**",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}>: Slot in **{queue}** läuft in **5 Min.** ab (tippe ⏳ zum Verlängern)",
+        "⚠️ {icon}Pilot <@{user_id}>: Flugslot in **{queue}** läuft in **5 Min.** ab (tippe ⏳ zum Verlängern)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> aus **{queue}** entfernt (abgelaufen)",
-        "⏰ {icon}<@{user_id}> Zeit in **{queue}** abgelaufen",
+        "⏰ {icon}Pilot <@{user_id}> hat **{queue}** verlassen · Slot abgelaufen",
+        "⏰ {icon}Pilot <@{user_id}> aus **{queue}** entfernt · Sensor-Timeout",
     ],
     "notify_match_formed_title": [
         "⚔️ {queue} Stufe {level} Flotte gebildet! (Match #{match_id})",

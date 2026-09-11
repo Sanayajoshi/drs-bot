@@ -19,40 +19,35 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** joined **{queue}** {count}",
-        "{icon}**{pilot}** queued for **{queue}** {count}",
-        "{icon}**{pilot}** ready for **{queue}** {count}",
-        "{icon}**{pilot}** on deck for **{queue}** {count}",
+        "{icon}Pilot **{pilot}** joined **{queue}** {count} · Ready for jump",
+        "{icon}Pilot **{pilot}** joined **{queue}** {count} · On flight deck",
+        "{icon}Pilot **{pilot}** joined **{queue}** {count} · Systems primed",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** left **{queue}**",
-        "🚪 {icon}**{pilot}** stepped out of **{queue}**",
-        "🚪 {icon}**{pilot}** canceled **{queue}**",
+        "🚪 {icon}Pilot **{pilot}** left **{queue}** · Undocked",
+        "🚪 {icon}Pilot **{pilot}** left **{queue}** · Returned to station",
+        "🚪 {icon}Pilot **{pilot}** left **{queue}** · Standby canceled",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** left all queues ({queues})",
-        "🚪 {icon}**{pilot}** exited all queues ({queues})",
+        "🚪 {icon}Pilot **{pilot}** left all queues ({queues}) · Returned to station",
+        "🚪 {icon}Pilot **{pilot}** left all queues ({queues}) · Flight plan cleared",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** voted Quick Start for **{queue}** {count}",
-        "⚡ {icon}{users}**{pilot}** triggered Quick Start for **{queue}** {count}",
-        "⚡ {icon}{users}**{pilot}** enabled Quick Start for **{queue}** {count}",
+        "⚡ {icon}{users}Pilot **{pilot}** activated Quick Start for **{queue}** {count}",
+        "⚡ {icon}{users}Pilot **{pilot}** requested Quick Start for **{queue}** {count}",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** extended **{queue}** (+30m)",
-        "⏳ {icon}**{pilot}** added +30m to **{queue}**",
+        "⏳ {icon}Pilot **{pilot}** extended flight slot for **{queue}** (+30m)",
     ],
     "notify_assist": [
-        "🆘 {icon}**{pilot}** requested assistance for **{queue}**",
-        "🆘 {icon}**{pilot}** needs wingmen for **{queue}**",
+        "🆘 {icon}Pilot **{pilot}** requested fleet escort for **{queue}**",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}>: spot in **{queue}** expires in **5m** (tap ⏳ to extend)",
-        "⚠️ {icon}<@{user_id}>: **{queue}** reservation expires in **5m** (tap ⏳ to extend)",
+        "⚠️ {icon}Pilot <@{user_id}>: flight slot in **{queue}** expires in **5m** (tap ⏳ to extend)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> removed from **{queue}** (expired)",
-        "⏰ {icon}<@{user_id}> timed out of **{queue}**",
+        "⏰ {icon}Pilot <@{user_id}> left **{queue}** · Slot expired",
+        "⏰ {icon}Pilot <@{user_id}> removed from **{queue}** · Sensor timeout",
     ],
     "notify_match_formed_title": [
         "⚔️ {queue} Level {level} Fleet Formed! (Match #{match_id})",

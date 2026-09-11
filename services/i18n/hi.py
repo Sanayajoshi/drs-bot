@@ -19,29 +19,34 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** **{queue}** {count} में शामिल हुए",
-        "{icon}**{pilot}** **{queue}** {count} के लिए तैयार हैं",
+        "{icon}पायलट **{pilot}** **{queue}** {count} में शामिल हुए · उड़ान के लिए तैयार",
+        "{icon}पायलट **{pilot}** **{queue}** {count} में शामिल हुए · फ्लाइट डेक पर उपस्थित",
+        "{icon}पायलट **{pilot}** **{queue}** {count} में शामिल हुए · सिस्टम सक्रिय",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** ने **{queue}** छोड़ दी",
+        "🚪 {icon}पायलट **{pilot}** ने **{queue}** छोड़ दी · स्टेशन की ओर प्रस्थान",
+        "🚪 {icon}पायलट **{pilot}** ने **{queue}** छोड़ दी · स्टैंडबाय रद्द",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** सभी कतारों ({queues}) से बाहर निकले",
+        "🚪 {icon}पायलट **{pilot}** सभी कतारों ({queues}) से बाहर निकले · स्टेशन की ओर प्रस्थान",
+        "🚪 {icon}पायलट **{pilot}** सभी कतारों ({queues}) से बाहर निकले · विश्राम मोड",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** ने **{queue}** {count} के लिए त्वरित शुरुआत सक्रिय की",
+        "⚡ {icon}{users}पायलट **{pilot}** ने **{queue}** {count} के लिए त्वरित शुरुआत सक्रिय की",
+        "⚡ {icon}{users}पायलट **{pilot}** ने **{queue}** {count} के लिए त्वरित शुरुआत का अनुरोध किया",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** ने **{queue}** का समय बढ़ाया (+30 मिनट)",
+        "⏳ {icon}पायलट **{pilot}** ने **{queue}** का स्लॉट बढ़ाया (+30 मिनट)",
     ],
     "notify_assist": [
-        "🆘 {icon}**{pilot}** ने **{queue}** के लिए सहायता मांगी",
+        "🆘 {icon}पायलट **{pilot}** ने **{queue}** के लिए बेड़ा सुरक्षा मांगी",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}>: **{queue}** स्लॉट **5 मिनट** में समाप्त होगा (⏳ से बढ़ाएं)",
+        "⚠️ {icon}पायलट <@{user_id}>: **{queue}** स्लॉट **5 मिनट** में समाप्त होगा (⏳ से बढ़ाएं)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> समय समाप्त होने पर **{queue}** से हटा दिए गए",
+        "⏰ {icon}पायलट <@{user_id}> ने **{queue}** छोड़ दी · स्लॉट समाप्त",
+        "⏰ {icon}पायलट <@{user_id}> सेंसर रेंज से बाहर होने पर **{queue}** से हटाए गए",
     ],
     "notify_match_formed_title": [
         "⚔️ {queue} स्तर {level} का बेड़ा तैयार! (मैच #{match_id})",

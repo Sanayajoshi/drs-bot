@@ -19,31 +19,35 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** が **{queue}** {count} に参加しました",
-        "{icon}**{pilot}** が **{queue}** {count} で待機中",
-        "{icon}**{pilot}** が **{queue}** {count} にエントリー",
+        "{icon}パイロット **{pilot}** が **{queue}** {count} に参加 · 発進準備完了",
+        "{icon}パイロット **{pilot}** が **{queue}** {count} に参加 · 発着デッキ待機中",
+        "{icon}パイロット **{pilot}** が **{queue}** {count} に参加 · 全システム稼働",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** が **{queue}** を離脱しました",
-        "🚪 {icon}**{pilot}** が **{queue}** を退出しました",
+        "🚪 {icon}パイロット **{pilot}** が **{queue}** を離脱 · 離脱完了",
+        "🚪 {icon}パイロット **{pilot}** が **{queue}** を離脱 · ステーションへ帰投",
+        "🚪 {icon}パイロット **{pilot}** が **{queue}** を離脱 · スタンバイ解除",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** が全キュー（{queues}) から離脱しました",
+        "🚪 {icon}パイロット **{pilot}** が全キュー（{queues}）を離脱 · ステーションへ帰投",
+        "🚪 {icon}パイロット **{pilot}** が全キュー（{queues}）を離脱 · フライト解除",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** が **{queue}** {count} のクイックスタートを有効化",
+        "⚡ {icon}{users}パイロット **{pilot}** が **{queue}** {count} のクイックスタートを有効化",
+        "⚡ {icon}{users}パイロット **{pilot}** が **{queue}** {count} のクイックスタートを要請",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** が **{queue}** を延長（+30分）",
+        "⏳ {icon}パイロット **{pilot}** が **{queue}** の待機枠を延長（+30分）",
     ],
     "notify_assist": [
-        "🆘 {icon}**{pilot}** が **{queue}** の支援を要請",
+        "🆘 {icon}パイロット **{pilot}** が **{queue}** の艦隊護衛を要請",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}>：**{queue}** の待機枠はあと **5分** で失効します（⏳ で延長）",
+        "⚠️ {icon}パイロット <@{user_id}>：**{queue}** の待機枠はあと **5分** で失効します（⏳ で延長）",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> は **{queue}** から時間切れで除外されました",
+        "⏰ {icon}パイロット <@{user_id}> が **{queue}** を離脱 · 時間切れ",
+        "⏰ {icon}パイロット <@{user_id}> はセンサー圏外のため **{queue}** から除外されました",
     ],
     "notify_match_formed_title": [
         "⚔️ {queue} レベル {level} 艦隊集結！(Match #{match_id})",

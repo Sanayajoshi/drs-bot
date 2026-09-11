@@ -19,31 +19,35 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** dołączył do **{queue}** {count}",
-        "{icon}**{pilot}** gotowy na **{queue}** {count}",
-        "{icon}**{pilot}** zajął miejsce w **{queue}** {count}",
+        "{icon}Pilot **{pilot}** dołączył do **{queue}** {count} · Gotowy do skoku",
+        "{icon}Pilot **{pilot}** dołączył do **{queue}** {count} · Na pokładzie startowym",
+        "{icon}Pilot **{pilot}** dołączył do **{queue}** {count} · Systemy aktywne",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** opuścił **{queue}**",
-        "🚪 {icon}**{pilot}** wyszedł z **{queue}**",
+        "🚪 {icon}Pilot **{pilot}** opuścił **{queue}** · Odcumowano",
+        "🚪 {icon}Pilot **{pilot}** opuścił **{queue}** · Powrót do stacji",
+        "🚪 {icon}Pilot **{pilot}** opuścił **{queue}** · Gotowość odwołana",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** opuścił wszystkie kolejki ({queues})",
+        "🚪 {icon}Pilot **{pilot}** opuścił wszystkie kolejki ({queues}) · Powrót do stacji",
+        "🚪 {icon}Pilot **{pilot}** opuścił wszystkie kolejki ({queues}) · Plan lotu zamknięty",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** włączył Szybki Start dla **{queue}** {count}",
+        "⚡ {icon}{users}Pilot **{pilot}** włączył Szybki Start dla **{queue}** {count}",
+        "⚡ {icon}{users}Pilot **{pilot}** zażądał Szybkiego Startu dla **{queue}** {count}",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** przedłużył czas w **{queue}** (+30m)",
+        "⏳ {icon}Pilot **{pilot}** przedłużył slot lotu w **{queue}** (+30m)",
     ],
     "notify_assist": [
-        "🆘 {icon}**{pilot}** prosi o asystę dla **{queue}**",
+        "🆘 {icon}Pilot **{pilot}** prosi o eskortę floty dla **{queue}**",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}>: miejsce w **{queue}** wygasa za **5 min** (kliknij ⏳, aby przedłużyć)",
+        "⚠️ {icon}Pilot <@{user_id}>: slot w **{queue}** wygasa za **5 min** (kliknij ⏳, aby przedłużyć)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> usunięty z **{queue}** (upłynął czas)",
+        "⏰ {icon}Pilot <@{user_id}> opuścił **{queue}** · Slot wygasł",
+        "⏰ {icon}Pilot <@{user_id}> usunięty z **{queue}** · Poza zasięgiem czujników",
     ],
     "notify_match_formed_title": [
         "⚔️ Flota {queue} Poziom {level} Sformowana! (Mecz #{match_id})",

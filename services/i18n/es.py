@@ -19,31 +19,35 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** se unió a **{queue}** {count}",
-        "{icon}**{pilot}** en cola para **{queue}** {count}",
-        "{icon}**{pilot}** listo para **{queue}** {count}",
+        "{icon}El piloto **{pilot}** se unió a **{queue}** {count} · Listo para el salto",
+        "{icon}El piloto **{pilot}** se unió a **{queue}** {count} · En cubierta de vuelo",
+        "{icon}El piloto **{pilot}** se unió a **{queue}** {count} · Sistemas activos",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** salió de **{queue}**",
-        "🚪 {icon}**{pilot}** abandonó **{queue}**",
+        "🚪 {icon}El piloto **{pilot}** salió de **{queue}** · Desacoplado",
+        "🚪 {icon}El piloto **{pilot}** salió de **{queue}** · Regreso a la estación",
+        "🚪 {icon}El piloto **{pilot}** salió de **{queue}** · Espera cancelada",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** salió de todas las colas ({queues})",
+        "🚪 {icon}El piloto **{pilot}** salió de todas las colas ({queues}) · Regreso a la estación",
+        "🚪 {icon}El piloto **{pilot}** salió de todas las colas ({queues}) · Plan de vuelo cerrado",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** activó Inicio Rápido para **{queue}** {count}",
+        "⚡ {icon}{users}El piloto **{pilot}** activó Inicio Rápido para **{queue}** {count}",
+        "⚡ {icon}{users}El piloto **{pilot}** solicitó Inicio Rápido para **{queue}** {count}",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** extendió **{queue}** (+30m)",
+        "⏳ {icon}El piloto **{pilot}** extendió su turno de vuelo en **{queue}** (+30m)",
     ],
     "notify_assist": [
-        "🆘 {icon}**{pilot}** solicitó asistencia para **{queue}**",
+        "🆘 {icon}El piloto **{pilot}** solicitó escolta de flota para **{queue}**",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}>: tu puesto en **{queue}** expira en **5 min** (toca ⏳ para renovar)",
+        "⚠️ {icon}Piloto <@{user_id}>: tu turno en **{queue}** expira en **5 min** (toca ⏳ para renovar)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> retirado de **{queue}** (expirado)",
+        "⏰ {icon}El piloto <@{user_id}> salió de **{queue}** · Turno expirado",
+        "⏰ {icon}Piloto <@{user_id}> retirado de **{queue}** · Tiempo de sensor agotado",
     ],
     "notify_match_formed_title": [
         "⚔️ ¡Flota de {queue} Nivel {level} Formada! (Partida #{match_id})",

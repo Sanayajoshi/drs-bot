@@ -19,31 +19,35 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** a rejoint **{queue}** {count}",
-        "{icon}**{pilot}** en file pour **{queue}** {count}",
-        "{icon}**{pilot}** paré pour **{queue}** {count}",
+        "{icon}Le pilote **{pilot}** a rejoint **{queue}** {count} · Paré au saut",
+        "{icon}Le pilote **{pilot}** a rejoint **{queue}** {count} · Sur le pont d'envol",
+        "{icon}Le pilote **{pilot}** a rejoint **{queue}** {count} · Systèmes parés",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** a quitté **{queue}**",
-        "🚪 {icon}**{pilot}** s'est retiré de **{queue}**",
+        "🚪 {icon}Le pilote **{pilot}** a quitté **{queue}** · Désarrimé",
+        "🚪 {icon}Le pilote **{pilot}** a quitté **{queue}** · Retour à la station",
+        "🚪 {icon}Le pilote **{pilot}** a quitté **{queue}** · Standby annulé",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** a quitté toutes les files ({queues})",
+        "🚪 {icon}Le pilote **{pilot}** a quitté toutes les files ({queues}) · Retour à la station",
+        "🚪 {icon}Le pilote **{pilot}** a quitté toutes les files ({queues}) · Plan de vol clôturé",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** a activé le Démarrage Rapide pour **{queue}** {count}",
+        "⚡ {icon}{users}Le pilote **{pilot}** a activé le Démarrage Rapide pour **{queue}** {count}",
+        "⚡ {icon}{users}Le pilote **{pilot}** demande le Démarrage Rapide pour **{queue}** {count}",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** a prolongé **{queue}** (+30m)",
+        "⏳ {icon}Le pilote **{pilot}** a prolongé son créneau de vol pour **{queue}** (+30m)",
     ],
     "notify_assist": [
-        "🆘 {icon}**{pilot}** demande de l'aide pour **{queue}**",
+        "🆘 {icon}Le pilote **{pilot}** demande une escorte de flotte pour **{queue}**",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}> : créneau **{queue}** expire dans **5 min** (cliquez sur ⏳ pour prolonger)",
+        "⚠️ {icon}Pilote <@{user_id}> : créneau de vol dans **{queue}** expire dans **5 min** (cliquez sur ⏳)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> retiré de **{queue}** (expiré)",
+        "⏰ {icon}Le pilote <@{user_id}> a quitté **{queue}** · Créneau expiré",
+        "⏰ {icon}Le pilote <@{user_id}> retiré de **{queue}** · Hors de portée capteurs",
     ],
     "notify_match_formed_title": [
         "⚔️ Flotte {queue} Niveau {level} Rassemblée ! (Match #{match_id})",
