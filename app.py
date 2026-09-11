@@ -51,6 +51,7 @@ class DRSBot(commands.Bot):
             "cogs.bonus_cog",  # New bonus cog
             "cogs.engagement_cog",  # Engagement & Facts cog
             "cogs.stats_cog",  # Player stats cog
+            "cogs.investigation_cog",  # Player investigation & conduct audit cog
             "cogs.help_cog",  # Interactive queue button help & guide cog
             "cogs.server_emoji_cog",  # Server icon to Application Emoji sync
         ]
@@ -382,6 +383,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

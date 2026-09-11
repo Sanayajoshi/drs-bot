@@ -11,6 +11,7 @@ Flow:
 """
 
 import logging
+from collections import Counter
 import discord
 from discord.ext import commands, tasks
 from discord import ui
@@ -443,6 +444,27 @@ class FeedbackCog(commands.Cog):
             if comment:
                 embed.add_field(name="Comment", value=comment[:1024], inline=False)
 
+            # Check past incident history for the reported player
+            past_rows = self.bot.db._execute(
+                "SELECT issue_type, resolved_at FROM feedback_reports WHERE reported_player_id = ? AND id != ?",
+                (reported_id, report_id),
+                fetch_all=True
+            ) or []
+            if past_rows:
+                total_past = len(past_rows)
+                open_past = sum(1 for pr in past_rows if not pr.get("resolved_at"))
+                resolved_past = total_past - open_past
+                issue_counts = Counter(pr.get("issue_type", "other") for pr in past_rows)
+                breakdown = ", ".join(f"{cnt} {ISSUE_LABELS.get(it, it)}" for it, cnt in issue_counts.most_common())
+                past_history_val = (
+                    f"⚠️ **{total_past} prior report(s):** {breakdown}\n"
+                    f"↳ *Current State:* `{open_past} 🔴 Open` · `{resolved_past} 🟢 Resolved`"
+                )
+            else:
+                past_history_val = "✅ **Clean Record** (First recorded incident for this player)"
+
+            embed.add_field(name="Past Incidents", value=past_history_val[:1024], inline=False)
+
             view = build_resolve_view(report_id)
 
             try:
@@ -513,5 +535,6 @@ class FeedbackCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(FeedbackCog(bot))
+
 
 
