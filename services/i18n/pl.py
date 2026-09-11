@@ -19,47 +19,31 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** zablokował pozycję w **{queue}** {count}! Silniki rozgrzane, oczekiwanie na koordynaty skoku.",
-        "{icon}Pilot **{pilot}** zameldował się w hangarze dla **{queue}** {count}! Uzbrojenie gotowe!",
-        "{icon}Wykryto sygnał: **{pilot}** wszedł do strefy przygotowawczej **{queue}** {count}. Kto leci z nim?",
-        "{icon}**{pilot}** zgłasza gotowość na pokładzie **{queue}** {count}. Ładowanie cewek warp!",
-        "{icon}Rejestr floty zaktualizowany: **{pilot}** dołączył do **{queue}** {count}. Cel namierzony!",
-        "{icon}**{pilot}** zapięty w kokpicie dla **{queue}** {count}. Stanowiska bojowe, piloci!",
+        "{icon}**{pilot}** dołączył do **{queue}** {count}",
+        "{icon}**{pilot}** gotowy na **{queue}** {count}",
+        "{icon}**{pilot}** zajął miejsce w **{queue}** {count}",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** odłączył się od **{queue}**. Powrót do doków stacji.",
-        "🚪 {icon}**{pilot}** odwołał gotowość w **{queue}**. Silniki wyłączone.",
-        "🚪 {icon}**{pilot}** przerwał procedurę skoku w **{queue}**. Pas startowy wolny.",
-        "🚪 {icon}Pilot **{pilot}** został odwołany do hangaru z **{queue}**.",
-        "🚪 {icon}Plan lotu anulowany: **{pilot}** opuścił **{queue}**.",
+        "🚪 {icon}**{pilot}** opuścił **{queue}**",
+        "🚪 {icon}**{pilot}** wyszedł z **{queue}**",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** wyczyścił wszystkie harmonogramy lotów ({queues}) i zszedł ze służby.",
-        "🚪 {icon}**{pilot}** wyłączył wszystkie statki i opuścił wszystkie kolejki ({queues}).",
-        "🚪 {icon}Lista startowa wyczyszczona dla **{pilot}** ({queues}). Miłego odpoczynku!",
+        "🚪 {icon}**{pilot}** opuścił wszystkie kolejki ({queues})",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** aktywował **Szybki Start** dla **{queue}** {count}! Gotowy do skoku gdy tylko zbierze się 2+ pilotów!",
-        "⚡ {icon}{users}Overdrive włączony! **{pilot}** nie zamierza czekać w **{queue}** {count} — gotowy do lotu!",
-        "⚡ {icon}{users}**{pilot}** wcisnął przycisk Szybkiego Startu w **{queue}** {count}! Rozgrzejcie silniki!",
+        "⚡ {icon}{users}**{pilot}** włączył Szybki Start dla **{queue}** {count}",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** zatankował paliwo: +30 minut dodane do slotu w **{queue}**!",
-        "⏳ {icon}**{pilot}** zamówił kolejną kawę kosmiczną — zostaje w **{queue}** na kolejne 30m!",
-        "⏳ {icon}Podtrzymywanie życia przedłużone! **{pilot}** dodał 30 minut do **{queue}**.",
+        "⏳ {icon}**{pilot}** przedłużył czas w **{queue}** (+30m)",
     ],
     "notify_assist": [
-        "🆘 {icon}Pilot **{pilot}** wystrzelił racę ratunkową! Szuka skrzydłowych do wsparcia!",
-        "🆘 {icon}**{pilot}** prosi o eskortę i asystę floty! Weterani, do maszyn!",
-        "🆘 {icon}Komunikacja floty: **{pilot}** oznaczył **Need Assist**! Kto wesprze w locie?",
+        "🆘 {icon}**{pilot}** prosi o asystę dla **{queue}**",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}> (**{pilot}**), twoje okno startowe w **{queue}** wygasa za **5 minut**! Kliknij ⏳ poniżej, aby przedłużyć!",
-        "⚠️ {icon}Światła ostrzegawcze migają: miejsce <@{user_id}> (**{pilot}**) w **{queue}** wygasa za 5 minut! Kliknij ⏳!",
+        "⚠️ {icon}<@{user_id}>: miejsce w **{queue}** wygasa za **5 min** (kliknij ⏳, aby przedłużyć)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> (**{pilot}**) oddalił się poza zasięg czujników — usunięty z **{queue}** z powodu braku aktywności.",
-        "⏰ {icon}Czas w hangarze wygasł dla <@{user_id}> (**{pilot}**) w **{queue}**. Miejsce zwolnione!",
+        "⏰ {icon}<@{user_id}> usunięty z **{queue}** (upłynął czas)",
     ],
     "notify_match_formed_title": [
         "⚔️ Flota {queue} Poziom {level} Sformowana! (Mecz #{match_id})",

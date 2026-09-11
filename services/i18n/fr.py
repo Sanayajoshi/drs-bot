@@ -19,47 +19,31 @@ STRINGS: dict = {
 
     # Channel Notifications (Broadcasts)
     "notify_joined": [
-        "{icon}**{pilot}** s'est verrouillé dans **{queue}** {count} ! Propulseurs amorcés, en attente des coordonnées de saut.",
-        "{icon}Le pilote **{pilot}** s'est enregistré au hangar pour **{queue}** {count} ! Armes parées !",
-        "{icon}Signal détecté : **{pilot}** entre en zone de rassemblement pour **{queue}** {count}. Qui saute avec lui ?",
-        "{icon}**{pilot}** sur le pont d'envol pour **{queue}** {count}. Bobines supraluminiques en charge !",
-        "{icon}Registre de flotte actualisé : **{pilot}** a rejoint **{queue}** {count}. Cap verrouillé !",
-        "{icon}**{pilot}** a bouclé son harnais pour **{queue}** {count}. Postes de combat, pilotes !",
+        "{icon}**{pilot}** a rejoint **{queue}** {count}",
+        "{icon}**{pilot}** en file pour **{queue}** {count}",
+        "{icon}**{pilot}** paré pour **{queue}** {count}",
     ],
     "notify_left": [
-        "🚪 {icon}**{pilot}** s'est désarrimé de **{queue}**. Retour aux quais de la station.",
-        "🚪 {icon}**{pilot}** a annulé son ordre de veille pour **{queue}**. Réacteurs coupés.",
-        "🚪 {icon}**{pilot}** a interrompu les préparatifs de saut pour **{queue}**. Piste dégagée.",
-        "🚪 {icon}Le pilote **{pilot}** a été rappelé au hangar depuis **{queue}**.",
-        "🚪 {icon}Plan de vol annulé : **{pilot}** a libéré sa place dans **{queue}**.",
+        "🚪 {icon}**{pilot}** a quitté **{queue}**",
+        "🚪 {icon}**{pilot}** s'est retiré de **{queue}**",
     ],
     "notify_left_all": [
-        "🚪 {icon}**{pilot}** a effacé tous ses créneaux ({queues}) et pris sa permission.",
-        "🚪 {icon}**{pilot}** a coupé tous ses vaisseaux et quitté toutes les files ({queues}).",
-        "🚪 {icon}Plan de vol vierge pour **{pilot}** ({queues}). Bon repos au mess !",
+        "🚪 {icon}**{pilot}** a quitté toutes les files ({queues})",
     ],
     "notify_qs": [
-        "⚡ {icon}{users}**{pilot}** a activé le **Démarrage Rapide** pour **{queue}** {count} ! Prêt à sauter dès 2+ pilotes !",
-        "⚡ {icon}{users}Postcombustion activée ! **{pilot}** ne veut pas attendre dans **{queue}** {count} — paré au saut !",
-        "⚡ {icon}{users}**{pilot}** a enclenché le Démarrage Rapide sur **{queue}** {count} ! Faites chauffer les turbines !",
+        "⚡ {icon}{users}**{pilot}** a activé le Démarrage Rapide pour **{queue}** {count}",
     ],
     "notify_extend": [
-        "⏳ {icon}**{pilot}** a refait le plein : +30 minutes ajoutées à son créneau **{queue}** !",
-        "⏳ {icon}**{pilot}** a repris un café de l'espace — reste amarré dans **{queue}** pour 30m de plus !",
-        "⏳ {icon}Survie prolongée ! **{pilot}** a ajouté 30 minutes à son billet pour **{queue}**.",
+        "⏳ {icon}**{pilot}** a prolongé **{queue}** (+30m)",
     ],
     "notify_assist": [
-        "🆘 {icon}Le pilote **{pilot}** a tiré une fusée de détresse ! Recherche ailiers en renfort !",
-        "🆘 {icon}**{pilot}** demande escorte et assistance de flotte ! Vétérans, aux commandes !",
-        "🆘 {icon}Comms de flotte : **{pilot}** a activé **Need Assist** ! Quels commandants sont prêts à escorter ?",
+        "🆘 {icon}**{pilot}** demande de l'aide pour **{queue}**",
     ],
     "notify_expiry_warning": [
-        "⚠️ {icon}<@{user_id}> (**{pilot}**), votre fenêtre de saut pour **{queue}** expire dans **5 minutes** ! Cliquez sur ⏳ pour prolonger !",
-        "⚠️ {icon}Voyants d'alerte allumés : la place de <@{user_id}> (**{pilot}**) dans **{queue}** expire dans **5 minutes** ! Tapez ⏳ !",
+        "⚠️ {icon}<@{user_id}> : créneau **{queue}** expire dans **5 min** (cliquez sur ⏳ pour prolonger)",
     ],
     "notify_expired": [
-        "⏰ {icon}<@{user_id}> (**{pilot}**) est sorti de portée radar — retiré de **{queue}** pour inactivité.",
-        "⏰ {icon}Créneau de hangar expiré pour <@{user_id}> (**{pilot}**) dans **{queue}**. Place libérée !",
+        "⏰ {icon}<@{user_id}> retiré de **{queue}** (expiré)",
     ],
     "notify_match_formed_title": [
         "⚔️ Flotte {queue} Niveau {level} Rassemblée ! (Match #{match_id})",
