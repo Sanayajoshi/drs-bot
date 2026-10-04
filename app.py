@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import discord
 from discord.ext import commands
 from aiohttp import web
@@ -368,18 +369,26 @@ async def start_web_server(bot: DRSBot):
 </html>"""
         return web.Response(text=html, content_type='text/html')
 
-    app = web.Application()
-    app.add_routes(routes)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', config.PORT)
-    await site.start()
-    logger.info(f"Web server started successfully on port {config.PORT}")
+    try:
+        app = web.Application()
+        app.add_routes(routes)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', config.PORT)
+        await site.start()
+        logger.info(f"Web server started successfully on port {config.PORT}")
+    except OSError as e:
+        logger.warning(f"Web server could not bind to port {config.PORT}: {e}. Running normal Discord bot.")
+    except Exception as e:
+        logger.warning(f"Web server failed to start: {e}. Running normal Discord bot.")
 
 
 async def main():
     bot = DRSBot()
-    await start_web_server(bot)
+    
+    # Only run web server if explicitly requested (disabled by default so it doesn't conflict on port 3000)
+    if os.getenv("ENABLE_WEB_SERVER", "false").lower() in ("true", "1", "yes"):
+        await start_web_server(bot)
     
     token = config.BOT_TOKEN
     if token:
@@ -388,10 +397,9 @@ async def main():
             await bot.start(token)
         except Exception as e:
             logger.error(f"Error starting Discord bot: {e}")
-            while True:
-                await asyncio.sleep(3600)
+            raise
     else:
-        logger.warning("DISCORD_BOT_TOKEN environment variable not set. Web server active on port 3000.")
+        logger.warning("DISCORD_BOT_TOKEN environment variable not set. Please add it to your .env file.")
         while True:
             await asyncio.sleep(3600)
 

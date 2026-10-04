@@ -702,6 +702,14 @@ class CombinedTechView(discord.ui.View):
         embed = view.build_embed(status_msg=f"⭐ **{self.selected_profile['profile_name']}** is now your active account for all queues and runs!")
         await interaction.response.edit_message(embed=embed, view=view)
 
+        # Immediately refresh queue boards if player is queued
+        try:
+            queue_cog = interaction.client.get_cog("QueueCog")
+            if queue_cog:
+                interaction.client.loop.create_task(queue_cog._push_queue_update())
+        except Exception:
+            pass
+
     async def on_edit_modal(self, interaction: discord.Interaction):
         modal = EditProfileModal(
             self.db,

@@ -560,11 +560,12 @@ class QueueCog(commands.Cog):
     async def _handle_join(self, interaction: discord.Interaction, level: int):
         await interaction.response.defer(ephemeral=True)
         discord_id   = interaction.user.id
-        display_name = interaction.user.display_name
+        raw_display_name = interaction.user.display_name
         guild_id     = interaction.guild_id
 
-        self.bot.db.upsert_user(discord_id, display_name)
-        self.bot.db.upsert_user_server(discord_id, guild_id, display_name)
+        self.bot.db.upsert_user(discord_id, raw_display_name)
+        self.bot.db.upsert_user_server(discord_id, guild_id, raw_display_name)
+        display_name = self.bot.db.get_effective_display_name(discord_id, fallback_name=raw_display_name)
 
         srv = self.bot.db.get_server(guild_id) or {}
         lang = srv.get("language", "en")
@@ -604,7 +605,7 @@ class QueueCog(commands.Cog):
     async def _handle_leave(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         discord_id = interaction.user.id
-        display_name = interaction.user.display_name
+        display_name = self.bot.db.get_effective_display_name(discord_id, fallback_name=interaction.user.display_name)
         srv = self.bot.db.get_server(interaction.guild_id) or {}
         lang = srv.get("language", "en")
 
@@ -633,7 +634,7 @@ class QueueCog(commands.Cog):
     async def _handle_extend_button(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         discord_id   = interaction.user.id
-        display_name = interaction.user.display_name
+        display_name = self.bot.db.get_effective_display_name(discord_id, fallback_name=interaction.user.display_name)
         srv = self.bot.db.get_server(interaction.guild_id) or {}
         lang = srv.get("language", "en")
 
@@ -690,7 +691,8 @@ class QueueCog(commands.Cog):
         except Exception:
             pass
 
-        await self._notify_extended(interaction.user.display_name, f"{queue_type}{level}", target_guild_id=interaction.guild_id)
+        effective_name = self.bot.db.get_effective_display_name(target_id, fallback_name=interaction.user.display_name)
+        await self._notify_extended(effective_name, f"{queue_type}{level}", target_guild_id=interaction.guild_id)
         await self._push_queue_update()
 
     # ------------------------------------------------------------------
@@ -700,6 +702,7 @@ class QueueCog(commands.Cog):
     async def _handle_quickstart(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         discord_id = interaction.user.id
+        display_name = self.bot.db.get_effective_display_name(discord_id, fallback_name=interaction.user.display_name)
         queue_type = self.bot.db.get_user_queue_mode(discord_id)
         srv = self.bot.db.get_server(interaction.guild_id) or {}
         lang = srv.get("language", "en")
@@ -720,7 +723,7 @@ class QueueCog(commands.Cog):
             await interaction.followup.send(t(lang, "qs_confirmed", queue=f"{queue_type}{drs_level}"), ephemeral=True)
         else:
             await interaction.followup.send(t(lang, "ephemeral_qs", queue=f"{queue_type}{drs_level}"), ephemeral=True)
-            await self._notify_quickstart(discord_id, interaction.user.display_name, drs_level, queue_type=queue_type, guild_id=interaction.guild_id)
+            await self._notify_quickstart(discord_id, display_name, drs_level, queue_type=queue_type, guild_id=interaction.guild_id)
 
         await self._push_queue_update()
 

@@ -857,12 +857,22 @@ class DatabaseOperations:
             (1 if value else 0, discord_id, drs_level)
         ) is not None
 
+    def get_effective_display_name(self, discord_id: int, fallback_name: str | None = None) -> str:
+        active_p = self.get_active_profile(discord_id)
+        prof_name = active_p.get("profile_name") if active_p else None
+        user = self.get_user(discord_id)
+        base_name = fallback_name or (user.get("display_name") if user else None) or f"Pilot {str(discord_id)[-4:]}"
+        if prof_name and prof_name.strip() and prof_name.strip().lower() != "main":
+            return prof_name.strip()
+        return base_name
+
     def get_queue_for_level(self, drs_level: int, queue_type: str = "DRS") -> list[dict]:
         rows = self._execute(
-            """SELECT qe.discord_id, u.display_name, up.profile_name, qe.expires_at, qe.joined_at, qe.quick_start, qe.queue_guild_id, qe.queue_type, u.need_assist
+            """SELECT qe.discord_id, u.display_name,
+                      (SELECT up.profile_name FROM user_profiles up WHERE up.discord_id = qe.discord_id AND up.is_active = 1 LIMIT 1) AS profile_name,
+                      qe.expires_at, qe.joined_at, qe.quick_start, qe.queue_guild_id, qe.queue_type, u.need_assist
                FROM queue_entries qe
                JOIN users u ON u.discord_id = qe.discord_id
-               LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                WHERE qe.drs_level = ? AND qe.queue_type = ? AND qe.expires_at > datetime('now')
                ORDER BY qe.joined_at ASC""",
             (drs_level, queue_type), fetch_all=True
@@ -872,7 +882,7 @@ class DatabaseOperations:
         res = []
         for r in rows:
             prof = r.get("profile_name")
-            display_name = f"{r['display_name']} ({prof.strip()})" if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
+            display_name = prof.strip() if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
             res.append({
                 "discord_id": r["discord_id"],
                 "display_name": display_name,
@@ -890,22 +900,24 @@ class DatabaseOperations:
     def get_full_queue(self, queue_type: str = None) -> list[dict]:
         if queue_type:
             rows = self._execute(
-                """SELECT qe.discord_id, u.display_name, up.profile_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
+                """SELECT qe.discord_id, u.display_name,
+                          (SELECT up.profile_name FROM user_profiles up WHERE up.discord_id = qe.discord_id AND up.is_active = 1 LIMIT 1) AS profile_name,
+                          qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
                           u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
                    FROM queue_entries qe
                    JOIN users u ON u.discord_id = qe.discord_id
-                   LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                    WHERE qe.queue_type = ? AND qe.expires_at > datetime('now')
                    ORDER BY qe.drs_level, qe.joined_at ASC""",
                 (queue_type,), fetch_all=True
             )
         else:
             rows = self._execute(
-                """SELECT qe.discord_id, u.display_name, up.profile_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
+                """SELECT qe.discord_id, u.display_name,
+                          (SELECT up.profile_name FROM user_profiles up WHERE up.discord_id = qe.discord_id AND up.is_active = 1 LIMIT 1) AS profile_name,
+                          qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
                           u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
                    FROM queue_entries qe
                    JOIN users u ON u.discord_id = qe.discord_id
-                   LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                    WHERE qe.expires_at > datetime('now')
                    ORDER BY qe.queue_type DESC, qe.drs_level, qe.joined_at ASC""",
                 fetch_all=True
@@ -915,7 +927,7 @@ class DatabaseOperations:
         res = []
         for r in rows:
             prof = r.get("profile_name")
-            display_name = f"{r['display_name']} ({prof.strip()})" if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
+            display_name = prof.strip() if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
             res.append({
                 "discord_id": r["discord_id"],
                 "display_name": display_name,
@@ -1014,11 +1026,12 @@ class DatabaseOperations:
 
     def get_match_participants(self, match_id: int) -> list[dict]:
         rows = self._execute(
-            """SELECT mp.discord_id, u.display_name, up.profile_name, u.genesis_level, u.enrich_level, u.modt_level,
+            """SELECT mp.discord_id, u.display_name,
+                      (SELECT up.profile_name FROM user_profiles up WHERE up.discord_id = mp.discord_id AND up.is_active = 1 LIMIT 1) AS profile_name,
+                      u.genesis_level, u.enrich_level, u.modt_level,
                       u.need_assist, mp.queue_guild_id, mp.wait_seconds
                FROM match_participants mp
                JOIN users u ON u.discord_id = mp.discord_id
-               LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                WHERE mp.match_id = ?""",
             (match_id,), fetch_all=True
         ) or []
@@ -1027,7 +1040,7 @@ class DatabaseOperations:
         res = []
         for r in rows:
             prof = r.get("profile_name")
-            display_name = f"{r['display_name']} ({prof.strip()})" if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
+            display_name = prof.strip() if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
             res.append({
                 "discord_id": r["discord_id"],
                 "display_name": display_name,
