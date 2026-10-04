@@ -287,18 +287,37 @@ class QueueCog(commands.Cog):
                 e for e in queue
                 if e["discord_id"] != trigger_discord_id and e.get("queue_guild_id") == g_id
             ]
-            user_mentions = " ".join(f"<@{p['discord_id']}>" for p in other_players_here) + " " if other_players_here else ""
+            user_mentions = ", ".join(f"<@{p['discord_id']}>" for p in other_players_here)
 
             lang = full_srv.get("language", "en")
-            line = t(
-                lang, "notify_qs",
-                icon=icon_prefix,
-                users=user_mentions,
-                pilot=display_name,
-                name=display_name,
-                queue=f"{queue_type}{drs_level}",
-                count=f"({current}/{total})"
-            )
+            if current <= 1:
+                line = t(
+                    lang, "notify_qs_alone",
+                    icon=icon_prefix,
+                    pilot=display_name,
+                    name=display_name,
+                    queue=f"{queue_type}{drs_level}",
+                    count=f"1/{total}"
+                )
+            elif user_mentions:
+                line = t(
+                    lang, "notify_qs_prompt",
+                    icon=icon_prefix,
+                    users=user_mentions,
+                    pilot=display_name,
+                    name=display_name,
+                    queue=f"{queue_type}{drs_level}",
+                    count=f"{current}/{total}"
+                )
+            else:
+                line = t(
+                    lang, "notify_qs_group",
+                    icon=icon_prefix,
+                    pilot=display_name,
+                    name=display_name,
+                    queue=f"{queue_type}{drs_level}",
+                    count=f"{current}/{total}"
+                )
             try:
                 await channel.send(line)
             except discord.Forbidden:

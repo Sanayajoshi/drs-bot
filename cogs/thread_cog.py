@@ -130,6 +130,13 @@ class ThreadCog(commands.Cog):
 
                 proceed = t(lang, "match_proceed", queue=f"{queue_type}{drs_level}", level=drs_level)
 
+                # SOS / Escort alert in thread content
+                sos_participants = [p for p in participants if p.get("need_assist")]
+                sos_alert_text = ""
+                if sos_participants:
+                    sos_mentions = " ".join(f"<@{p['discord_id']}>" for p in sos_participants)
+                    sos_alert_text = f"\n🆘 **Fleet Carry Notice:** {sos_mentions} signed up as **SOS** and will need a carry for this run!"
+
                 # Build bonus embed if there are active bonuses
                 bonus_embed = self._build_bonus_embed(lang)
                 #bonus_embed = self._build_bonus_embed(active_bonuses, lang)
@@ -139,7 +146,7 @@ class ThreadCog(commands.Cog):
                     embeds.append(bonus_embed)
 
                 await thread.send(
-                    content=f"{mentions}\n{proceed}",
+                    content=f"{mentions}{sos_alert_text}\n{proceed}",
                     embeds=embeds,
                     view=bell_view,
                 )
@@ -191,7 +198,7 @@ class ThreadCog(commands.Cog):
         rows = []
         for p in participants:
             pid     = p["discord_id"]
-            name    = p["display_name"][:12]
+            name    = p["display_name"][:16]
             server_icon = (id_to_emoji.get(pid) if id_to_emoji else None) or self.bot.db.get_server_emoji_tag(p.get("queue_guild_id"))
             gen_lvl = p.get("genesis_level")
             enr_lvl = p.get("enrich_level")
@@ -208,10 +215,21 @@ class ThreadCog(commands.Cog):
             wait_min = max(0, int(round(wait_sec / 60)))
             wait_str = f"({wait_min}m)"
 
-            row = f"{server_icon} ` {wait_str:<6}{name:<12}` {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
+            sos_badge = " 🆘" if p.get("need_assist") else ""
+            row = f"{server_icon} ` {wait_str:<6}{name:<16}`{sos_badge} {gen_icon}`{gen_str:<2}`  {enr_icon}`{enr_str:<2}`  {EMOJI_RSE}`{rse_str:<2}`"
             rows.append(row)
 
         embed.add_field(name="\u200b", value="\n".join(rows), inline=False)
+
+        # SOS / Escort Carry Notice in embed
+        sos_players = [p for p in participants if p.get("need_assist")]
+        if sos_players:
+            sos_names = ", ".join(f"**{p['display_name']}**" for p in sos_players)
+            embed.add_field(
+                name="🆘 Fleet Escort / Carry Notice",
+                value=f"⚠️ {sos_names} signed up as **SOS** and will need a carry for this run!",
+                inline=False
+            )
 
         missing = [p for p in participants if p.get("genesis_level") is None or p.get("enrich_level") is None]
         if missing:

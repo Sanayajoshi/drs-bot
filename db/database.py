@@ -859,50 +859,79 @@ class DatabaseOperations:
 
     def get_queue_for_level(self, drs_level: int, queue_type: str = "DRS") -> list[dict]:
         rows = self._execute(
-            """SELECT qe.discord_id, u.display_name, qe.expires_at, qe.joined_at, qe.quick_start, qe.queue_guild_id, qe.queue_type, u.need_assist
-               FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
+            """SELECT qe.discord_id, u.display_name, up.profile_name, qe.expires_at, qe.joined_at, qe.quick_start, qe.queue_guild_id, qe.queue_type, u.need_assist
+               FROM queue_entries qe
+               JOIN users u ON u.discord_id = qe.discord_id
+               LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                WHERE qe.drs_level = ? AND qe.queue_type = ? AND qe.expires_at > datetime('now')
                ORDER BY qe.joined_at ASC""",
             (drs_level, queue_type), fetch_all=True
         )
         if not rows:
             return []
-        return [{"discord_id": r["discord_id"], "display_name": r["display_name"],
-                 "expires_at": _parse_dt(r["expires_at"]), "joined_at": _parse_dt(r["joined_at"]),
-                 "quick_start": bool(r["quick_start"]),
-                 "queue_guild_id": r["queue_guild_id"],
-                 "queue_type": r.get("queue_type", "DRS"),
-                 "need_assist": bool(r.get("need_assist", 0))} for r in rows]
+        res = []
+        for r in rows:
+            prof = r.get("profile_name")
+            display_name = f"{r['display_name']} ({prof.strip()})" if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
+            res.append({
+                "discord_id": r["discord_id"],
+                "display_name": display_name,
+                "base_display_name": r["display_name"],
+                "profile_name": prof,
+                "expires_at": _parse_dt(r["expires_at"]),
+                "joined_at": _parse_dt(r["joined_at"]),
+                "quick_start": bool(r["quick_start"]),
+                "queue_guild_id": r["queue_guild_id"],
+                "queue_type": r.get("queue_type", "DRS"),
+                "need_assist": bool(r.get("need_assist", 0))
+            })
+        return res
 
     def get_full_queue(self, queue_type: str = None) -> list[dict]:
         if queue_type:
             rows = self._execute(
-                """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
+                """SELECT qe.discord_id, u.display_name, up.profile_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
                           u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
-                   FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
+                   FROM queue_entries qe
+                   JOIN users u ON u.discord_id = qe.discord_id
+                   LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                    WHERE qe.queue_type = ? AND qe.expires_at > datetime('now')
                    ORDER BY qe.drs_level, qe.joined_at ASC""",
                 (queue_type,), fetch_all=True
             )
         else:
             rows = self._execute(
-                """SELECT qe.discord_id, u.display_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
+                """SELECT qe.discord_id, u.display_name, up.profile_name, qe.drs_level, qe.queue_type, qe.expires_at, qe.quick_start, qe.queue_guild_id,
                           u.genesis_level, u.enrich_level, u.modt_level, u.need_assist
-                   FROM queue_entries qe JOIN users u ON u.discord_id = qe.discord_id
+                   FROM queue_entries qe
+                   JOIN users u ON u.discord_id = qe.discord_id
+                   LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                    WHERE qe.expires_at > datetime('now')
                    ORDER BY qe.queue_type DESC, qe.drs_level, qe.joined_at ASC""",
                 fetch_all=True
             )
         if not rows:
             return []
-        return [{"discord_id": r["discord_id"], "display_name": r["display_name"],
-                 "drs_level": r["drs_level"], "queue_type": r.get("queue_type", "DRS"),
-                 "expires_at": _parse_dt(r["expires_at"]),
-                 "quick_start": bool(r["quick_start"]),
-                 "queue_guild_id": r["queue_guild_id"],
-                 "genesis_level": r["genesis_level"], "enrich_level": r["enrich_level"],
-                 "modt_level": r["modt_level"],
-                 "need_assist": bool(r.get("need_assist", 0))} for r in rows]
+        res = []
+        for r in rows:
+            prof = r.get("profile_name")
+            display_name = f"{r['display_name']} ({prof.strip()})" if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
+            res.append({
+                "discord_id": r["discord_id"],
+                "display_name": display_name,
+                "base_display_name": r["display_name"],
+                "profile_name": prof,
+                "drs_level": r["drs_level"],
+                "queue_type": r.get("queue_type", "DRS"),
+                "expires_at": _parse_dt(r["expires_at"]),
+                "quick_start": bool(r["quick_start"]),
+                "queue_guild_id": r["queue_guild_id"],
+                "genesis_level": r["genesis_level"],
+                "enrich_level": r["enrich_level"],
+                "modt_level": r["modt_level"],
+                "need_assist": bool(r.get("need_assist", 0))
+            })
+        return res
 
     def remove_expired_entries(self) -> list[dict]:
         if not self.connection:
@@ -984,13 +1013,34 @@ class DatabaseOperations:
         return self._execute("SELECT * FROM matches WHERE id = ?", (match_id,), fetch_one=True)
 
     def get_match_participants(self, match_id: int) -> list[dict]:
-        return self._execute(
-            """SELECT mp.discord_id, u.display_name, u.genesis_level, u.enrich_level, u.modt_level,
-                      mp.queue_guild_id, mp.wait_seconds
-               FROM match_participants mp JOIN users u ON u.discord_id = mp.discord_id
+        rows = self._execute(
+            """SELECT mp.discord_id, u.display_name, up.profile_name, u.genesis_level, u.enrich_level, u.modt_level,
+                      u.need_assist, mp.queue_guild_id, mp.wait_seconds
+               FROM match_participants mp
+               JOIN users u ON u.discord_id = mp.discord_id
+               LEFT JOIN user_profiles up ON up.discord_id = u.discord_id AND up.is_active = 1
                WHERE mp.match_id = ?""",
             (match_id,), fetch_all=True
         ) or []
+        if not rows:
+            return []
+        res = []
+        for r in rows:
+            prof = r.get("profile_name")
+            display_name = f"{r['display_name']} ({prof.strip()})" if prof and prof.strip() and prof.strip().lower() != "main" else r["display_name"]
+            res.append({
+                "discord_id": r["discord_id"],
+                "display_name": display_name,
+                "base_display_name": r["display_name"],
+                "profile_name": prof,
+                "genesis_level": r["genesis_level"],
+                "enrich_level": r["enrich_level"],
+                "modt_level": r["modt_level"],
+                "need_assist": bool(r.get("need_assist", 0)),
+                "queue_guild_id": r["queue_guild_id"],
+                "wait_seconds": r.get("wait_seconds", 0)
+            })
+        return res
 
     def get_participant_queue_guilds(self, participant_ids: list[int]) -> dict[int, int]:
         """

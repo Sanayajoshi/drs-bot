@@ -36,6 +36,16 @@ STRINGS: dict = {
         "⚡ {icon}{users}Pilot **{pilot}** activated Quick Start for **{queue}** {count}",
         "⚡ {icon}{users}Pilot **{pilot}** requested Quick Start for **{queue}** {count}",
     ],
+    "notify_qs_alone": [
+        "⚡ {icon}Pilot **{pilot}** ready to go {count} ({queue})",
+    ],
+    "notify_qs_prompt": [
+        "⚡ {icon}{users}, Pilot **{pilot}** ready to go {count} ({queue}), press quickstart to start",
+    ],
+    "notify_qs_group": [
+        "⚡ {icon}Pilot **{pilot}** ready to go {count} ({queue}), press quickstart to start",
+    ],
+    "match_sos_alert": "🆘 **Fleet Escort Alert:** {names} signed up as **SOS** and will need a carry!",
     "notify_extend": [
         "⏳ {icon}Pilot **{pilot}** extended flight slot for **{queue}** (+30m)",
     ],

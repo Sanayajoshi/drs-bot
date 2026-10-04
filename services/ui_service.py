@@ -104,12 +104,12 @@ def build_queue_embeds(
             remaining = _format_remaining(e["expires_at"])
             qs_marker = f" {config.EMOJI_QUICKSTART}" if e.get("quick_start") else ""
             help_marker = f" {random.choice(HELP_ICONS)}" if e.get("need_assist") else ""
-            name = e["display_name"][:15]
+            name = e["display_name"][:18]
             gen_lvl = e.get("genesis_level", "?") if e.get("genesis_level") is not None else "?"
             enr_lvl = e.get("enrich_level", "?") if e.get("enrich_level") is not None else "?"
             rse_lvl = e.get("modt_level", "?") if e.get("modt_level") is not None else "?"
             server_icon = (emoji_map.get(e.get("queue_guild_id")) if emoji_map else None) or e.get("emoji_tag") or "🌐"
-            rows.append(f"{server_icon} `{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
+            rows.append(f"{server_icon} `{name:<18}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
 
         filled = min(len(entries), config.DRS_MATCH_SIZE)
         empty = config.DRS_MATCH_SIZE - filled
@@ -159,12 +159,12 @@ def build_queue_embeds(
             remaining = _format_remaining(e["expires_at"])
             qs_marker = f" {config.EMOJI_QUICKSTART}" if e.get("quick_start") else ""
             help_marker = f" {random.choice(HELP_ICONS)}" if e.get("need_assist") else ""
-            name = e["display_name"][:15]
+            name = e["display_name"][:18]
             gen_lvl = e.get("genesis_level", "?") if e.get("genesis_level") is not None else "?"
             enr_lvl = e.get("enrich_level", "?") if e.get("enrich_level") is not None else "?"
             rse_lvl = e.get("modt_level", "?") if e.get("modt_level") is not None else "?"
             server_icon = (emoji_map.get(e.get("queue_guild_id")) if emoji_map else None) or e.get("emoji_tag") or "🌐"
-            rows.append(f"{server_icon} `{name:<15}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
+            rows.append(f"{server_icon} `{name:<18}`{qs_marker:<2}{help_marker} {GEN} `{gen_lvl:<2}`  {ENR} `{enr_lvl:<2}`  {RSE} `{rse_lvl:<2}` — {remaining}")
 
         filled = min(len(entries), config.RS_MATCH_SIZE)
         empty = config.RS_MATCH_SIZE - filled
