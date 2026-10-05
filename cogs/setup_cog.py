@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import config
-from services.i18n import get as t
+from services.i18n import get as t, SUPPORTED_LANGUAGES
 from cogs.help_cog import build_main_help_embed, EphemeralHelpView
 
 logger = logging.getLogger("setup_cog")
@@ -105,6 +105,17 @@ class SetupCog(commands.Cog):
         server = self.bot.db.get_server(interaction.guild_id)
         if server and server.get("manager_role_id"):
             role_ids = [r.id for r in interaction.user.roles]
+            return server["manager_role_id"] in role_ids
+        return False
+
+    def _is_ctx_authorized(self, ctx: commands.Context) -> bool:
+        if ctx.author.id in config.DEV_USER_IDS:
+            return True
+        if ctx.author.guild_permissions.administrator:
+            return True
+        server = self.bot.db.get_server(ctx.guild.id)
+        if server and server.get("manager_role_id"):
+            role_ids = [r.id for r in ctx.author.roles]
             return server["manager_role_id"] in role_ids
         return False
 
@@ -325,6 +336,66 @@ class SetupCog(commands.Cog):
         await interaction.response.send_message(
             t(language.value, "lang_set", lang=language.name), ephemeral=True
         )
+
+    @drs.command(name="sync", description="Instantly sync and refresh slash commands in this server")
+    async def sync_slash(self, interaction: discord.Interaction):
+        lang = self._lang(interaction.guild_id)
+        if not self._is_authorized(interaction):
+            await interaction.response.send_message(t(lang, "setup_no_auth"), ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            self.bot.tree.copy_global_to(guild=interaction.guild)
+            synced = await self.bot.tree.sync(guild=interaction.guild)
+            await interaction.followup.send(
+                f"✅ **Synced {len(synced)} command(s) directly to this server!**\n"
+                "💡 If you still see old cached options, press **Ctrl+R** (or Cmd+R on Mac) to reload Discord.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Failed to sync: {e}", ephemeral=True)
+
+    @commands.command(name="sync")
+    async def sync_prefix(self, ctx: commands.Context):
+        """Instantly sync slash commands to this server via prefix command."""
+        if not self._is_ctx_authorized(ctx):
+            await ctx.send("❌ You need Administrator permission or the manager role.")
+            return
+
+        msg = await ctx.send("🔄 Syncing slash commands directly to this server...")
+        try:
+            self.bot.tree.copy_global_to(guild=ctx.guild)
+            synced = await self.bot.tree.sync(guild=ctx.guild)
+            await msg.edit(content=(
+                f"✅ **Synced {len(synced)} command(s) directly to {ctx.guild.name}!**\n"
+                "💡 Press **Ctrl+R** (or Cmd+R on Mac) to reload Discord and refresh the command list."
+            ))
+        except Exception as e:
+            await msg.edit(content=f"❌ Failed to sync commands: {e}")
+
+    @commands.command(name="language", aliases=["lang", "setlang"])
+    async def language_prefix(self, ctx: commands.Context, code: str = None):
+        """Set or view the server display language via prefix command (e.g. .lang ru)."""
+        if not self._is_ctx_authorized(ctx):
+            await ctx.send("❌ You need Administrator permission or the manager role.")
+            return
+
+        supported = config.SUPPORTED_LANGUAGES
+        if not code or code.lower() not in supported:
+            curr = self._lang(ctx.guild.id)
+            langs_list = "\n".join(f"• `{c}`: {SUPPORTED_LANGUAGES.get(c, c)}" for c in supported)
+            await ctx.send(
+                f"Current server language: **{curr}**\n\n"
+                f"**Supported languages:**\n{langs_list}\n\n"
+                f"*To change, use:* `.lang <code>` (e.g. `.lang ru` or `.lang uk`)"
+            )
+            return
+
+        lang_code = code.lower()
+        self.bot.db.upsert_server(ctx.guild.id, language=lang_code)
+        lang_name = SUPPORTED_LANGUAGES.get(lang_code, lang_code)
+        await ctx.send(t(lang_code, "lang_set", lang=lang_name))
 
     @drs.command(name="status", description="Show current bot configuration for this server")
     async def status(self, interaction: discord.Interaction):
