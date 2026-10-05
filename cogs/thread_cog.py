@@ -130,23 +130,30 @@ class ThreadCog(commands.Cog):
 
                 proceed = t(lang, "match_proceed", queue=f"{queue_type}{drs_level}", level=drs_level)
 
-                # SOS / Escort alert in thread content
+                # SOS / Escort alert as a dedicated, high-visibility 1-line embed
                 sos_participants = [p for p in participants if p.get("need_assist")]
-                sos_alert_text = ""
+                sos_embed = None
                 if sos_participants:
                     sos_mentions = " ".join(f"<@{p['discord_id']}>" for p in sos_participants)
-                    sos_alert_text = f"\n🆘 **Fleet Carry Notice:** {sos_mentions} signed up as **SOS** and will need a carry for this run!"
+                    sos_text = t(lang, "match_sos_alert", names=sos_mentions)
+                    sos_embed = discord.Embed(
+                        description=sos_text,
+                        color=discord.Color.from_rgb(239, 68, 68)
+                    )
 
                 # Build bonus embed if there are active bonuses
                 bonus_embed = self._build_bonus_embed(lang)
                 #bonus_embed = self._build_bonus_embed(active_bonuses, lang)
 
-                embeds = [match_embed]
+                embeds = []
+                if sos_embed:
+                    embeds.append(sos_embed)
+                embeds.append(match_embed)
                 if bonus_embed:
                     embeds.append(bonus_embed)
 
                 await thread.send(
-                    content=f"{mentions}{sos_alert_text}\n{proceed}",
+                    content=f"{mentions}\n{proceed}",
                     embeds=embeds,
                     view=bell_view,
                 )

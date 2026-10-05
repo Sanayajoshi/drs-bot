@@ -36,6 +36,16 @@ STRINGS: dict = {
         "⚡ {icon}{users}Le pilote **{pilot}** a activé le Démarrage Rapide pour **{queue}** {count}",
         "⚡ {icon}{users}Le pilote **{pilot}** demande le Démarrage Rapide pour **{queue}** {count}",
     ],
+    "notify_qs_alone": [
+        "⚡ {icon}Pilote **{pilot}** prêt au décollage {count} ({queue})",
+    ],
+    "notify_qs_prompt": [
+        "⚡ {icon}{users}, Pilote **{pilot}** prêt au décollage {count} ({queue}), appuyez sur démarrage rapide pour lancer",
+    ],
+    "notify_qs_group": [
+        "⚡ {icon}Pilote **{pilot}** prêt au décollage {count} ({queue}), appuyez sur démarrage rapide pour lancer",
+    ],
+    "match_sos_alert": "🆘 **Alerte Escorte de Flotte :** {names} s'est inscrit en **SOS** et aura besoin d'aide/carry !",
     "notify_extend": [
         "⏳ {icon}Le pilote **{pilot}** a prolongé son créneau de vol pour **{queue}** (+30m)",
     ],

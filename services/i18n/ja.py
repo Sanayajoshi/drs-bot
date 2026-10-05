@@ -36,6 +36,16 @@ STRINGS: dict = {
         "⚡ {icon}{users}パイロット **{pilot}** が **{queue}** {count} のクイックスタートを有効化",
         "⚡ {icon}{users}パイロット **{pilot}** が **{queue}** {count} のクイックスタートを要請",
     ],
+    "notify_qs_alone": [
+        "⚡ {icon}パイロット **{pilot}** 出撃準備完了 {count} ({queue})",
+    ],
+    "notify_qs_prompt": [
+        "⚡ {icon}{users}、パイロット **{pilot}** 出撃準備完了 {count} ({queue})。クイックスタートを押して出撃してください",
+    ],
+    "notify_qs_group": [
+        "⚡ {icon}パイロット **{pilot}** 出撃準備完了 {count} ({queue})。クイックスタートを押して出撃してください",
+    ],
+    "match_sos_alert": "🆘 **艦隊護衛アラート:** {names} が **SOS**（要キャリー）で参加しています！",
     "notify_extend": [
         "⏳ {icon}パイロット **{pilot}** が **{queue}** の待機枠を延長（+30分）",
     ],

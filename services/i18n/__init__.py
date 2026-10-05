@@ -16,7 +16,7 @@ import re
 import logging
 from typing import Any
 
-from services.i18n import en, ja, es, de, hi, pl, fr
+from services.i18n import en, ja, es, de, hi, pl, fr, ru, uk
 
 logger = logging.getLogger("drs.i18n")
 
@@ -28,6 +28,8 @@ STRINGS: dict[str, dict] = {
     "hi": hi.STRINGS,
     "pl": pl.STRINGS,
     "fr": fr.STRINGS,
+    "ru": ru.STRINGS,
+    "uk": uk.STRINGS,
 }
 
 SUPPORTED_LANGUAGES: dict[str, str] = {
@@ -38,6 +40,8 @@ SUPPORTED_LANGUAGES: dict[str, str] = {
     "hi": "हिन्दी (Hindi)",
     "pl": "Polski (Polish)",
     "fr": "Français (French)",
+    "ru": "Русский (Russian)",
+    "uk": "Українська (Ukrainian)",
 }
 
 # In-memory cache for dynamic DB overrides / variations: {lang: {msg_key: [texts]}}

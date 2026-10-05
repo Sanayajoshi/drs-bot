@@ -32,7 +32,7 @@ FEEDBACK_DELAY_MINS = 30
 
 # i18n
 DEFAULT_LANGUAGE = "en"
-SUPPORTED_LANGUAGES = ["en", "ja", "es", "de", "hi", "pl", "fr"]
+SUPPORTED_LANGUAGES = ["en", "ja", "es", "de", "hi", "pl", "fr", "ru", "uk"]
 
 # Developer / Super Admin User IDs
 DEV_USER_IDS = [508209182374363137, 702623662531936356, 670486428743892993]
