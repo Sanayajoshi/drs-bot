@@ -548,7 +548,7 @@ class ThreadCog(commands.Cog):
 
         reactions = group.get("reactions", {})
 
-        # If all reactions removed, clean up notices
+        # If all reactions removed, clean up notices across all threads
         if not reactions:
             for g_id, notice_info in list(group.get("notices", {}).items()):
                 try:
@@ -560,17 +560,32 @@ class ThreadCog(commands.Cog):
             group["notices"] = {}
             return
 
-        # Build compact reaction line
-        tokens = [f"{r['emoji']} **{r['pilot']}** [{r['corp']}]" for r in reactions.values()]
-        reactions_str = "  •  ".join(tokens)
-        embed = discord.Embed(
-            description=f"💬 **Reactions:** {reactions_str}",
-            color=discord.Color.from_rgb(47, 49, 54)
-        )
-
-        # Update or send reply in each thread
+        # Update or send reply in each thread, filtering out local reactions
         for guild_id, msg_ref in list(group.get("messages", {}).items()):
+            # Only show reactions that originated from OTHER servers to this thread
+            external_reactions = [r for r in reactions.values() if r.get("guild_id") != guild_id]
             existing_notice = group.get("notices", {}).get(guild_id)
+
+            if not external_reactions:
+                # If there are no cross-server reactions for this thread, remove any existing notice
+                if existing_notice:
+                    try:
+                        chan = self.bot.get_channel(msg_ref["channel_id"]) or await self.bot.fetch_channel(msg_ref["channel_id"])
+                        n_msg = await chan.fetch_message(existing_notice["message_id"])
+                        await n_msg.delete()
+                    except Exception:
+                        pass
+                    group["notices"].pop(guild_id, None)
+                continue
+
+            # Build compact reaction line specifically for external reactions
+            tokens = [f"{r['emoji']} by {r['pilot']}" for r in external_reactions]
+            reactions_str = "  •  ".join(tokens)
+            embed = discord.Embed(
+                description=reactions_str,
+                color=discord.Color.from_rgb(47, 49, 54)
+            )
+
             if existing_notice:
                 try:
                     chan = self.bot.get_channel(msg_ref["channel_id"]) or await self.bot.fetch_channel(msg_ref["channel_id"])
@@ -627,6 +642,7 @@ class ThreadCog(commands.Cog):
             "pilot": member.display_name,
             "corp": corp_name,
             "emoji": emoji_str,
+            "guild_id": payload.guild_id,
         }
         await self._sync_reaction_reply(group_id)
 
