@@ -40,6 +40,29 @@ class ThreadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.thread_service = ThreadService(bot.db)
+        self._msg_to_group: dict[int, str] = {}
+        self._message_groups: dict[str, dict] = {}
+
+    def _register_message(self, group_id: str, match_id: int, guild_id: int, channel_id: int, message_id: int):
+        if group_id not in self._message_groups:
+            if len(self._message_groups) > 500:
+                old_keys = list(self._message_groups.keys())[:100]
+                for ok in old_keys:
+                    old_grp = self._message_groups.pop(ok, None)
+                    if old_grp:
+                        for m in old_grp.get("messages", {}).values():
+                            self._msg_to_group.pop(m["message_id"], None)
+            self._message_groups[group_id] = {
+                "match_id": match_id,
+                "messages": {},
+                "reactions": {},
+                "notices": {},
+            }
+        self._message_groups[group_id]["messages"][guild_id] = {
+            "channel_id": channel_id,
+            "message_id": message_id,
+        }
+        self._msg_to_group[message_id] = group_id
 
     def _lang(self, guild_id: int) -> str:
         server = self.bot.db.get_server(guild_id)
@@ -152,11 +175,12 @@ class ThreadCog(commands.Cog):
                 if bonus_embed:
                     embeds.append(bonus_embed)
 
-                await thread.send(
+                intro_msg = await thread.send(
                     content=f"{mentions}\n{proceed}",
                     embeds=embeds,
                     view=bell_view,
                 )
+                self._register_message(f"intro_{match_id}", match_id, guild_id, thread.id, intro_msg.id)
 
                 self.bot.db.save_match_thread(match_id, guild_id, thread.id)
                 created_threads.append({"guild_id": guild_id, "thread_id": thread.id, "lang": lang})
@@ -424,6 +448,8 @@ class ThreadCog(commands.Cog):
         author_label = f"{message.author.display_name} [{corp_name}]"
 
         all_threads = self.bot.db.get_match_threads(match_id)
+        group_id = f"m_{match_id}_{message.id}"
+        self._register_message(group_id, match_id, source_guild_id, message.channel.id, message.id)
 
         for thread_info in all_threads:
             if thread_info["guild_id"] == source_guild_id:
@@ -456,7 +482,8 @@ class ThreadCog(commands.Cog):
 
             try:
                 target_thread = await self.bot.fetch_channel(thread_info["thread_id"])
-                await target_thread.send(embed=embed)
+                relayed_msg = await target_thread.send(embed=embed)
+                self._register_message(group_id, match_id, thread_info["guild_id"], target_thread.id, relayed_msg.id)
             except discord.NotFound:
                 logger.warning(f"Thread {thread_info['thread_id']} not found — skipping relay")
             except Exception as e:
@@ -511,70 +538,120 @@ class ThreadCog(commands.Cog):
                 logger.error(f"Report relay failed to thread {thread_info['thread_id']}: {e}", exc_info=True)
 
     # ------------------------------------------------------------------
-    # Cross-Server Reaction Pass-through in Match Threads
+    # Cross-Server Reaction Pass-through (In-Place Linked Replies)
     # ------------------------------------------------------------------
+
+    async def _sync_reaction_reply(self, group_id: str):
+        group = self._message_groups.get(group_id)
+        if not group:
+            return
+
+        reactions = group.get("reactions", {})
+
+        # If all reactions removed, clean up notices
+        if not reactions:
+            for g_id, notice_info in list(group.get("notices", {}).items()):
+                try:
+                    chan = self.bot.get_channel(notice_info["channel_id"]) or await self.bot.fetch_channel(notice_info["channel_id"])
+                    n_msg = await chan.fetch_message(notice_info["message_id"])
+                    await n_msg.delete()
+                except Exception:
+                    pass
+            group["notices"] = {}
+            return
+
+        # Build compact reaction line
+        tokens = [f"{r['emoji']} **{r['pilot']}** [{r['corp']}]" for r in reactions.values()]
+        reactions_str = "  •  ".join(tokens)
+        embed = discord.Embed(
+            description=f"💬 **Reactions:** {reactions_str}",
+            color=discord.Color.from_rgb(47, 49, 54)
+        )
+
+        # Update or send reply in each thread
+        for guild_id, msg_ref in list(group.get("messages", {}).items()):
+            existing_notice = group.get("notices", {}).get(guild_id)
+            if existing_notice:
+                try:
+                    chan = self.bot.get_channel(msg_ref["channel_id"]) or await self.bot.fetch_channel(msg_ref["channel_id"])
+                    notice_msg = await chan.fetch_message(existing_notice["message_id"])
+                    await notice_msg.edit(embed=embed)
+                    continue
+                except Exception:
+                    group["notices"].pop(guild_id, None)
+
+            try:
+                chan = self.bot.get_channel(msg_ref["channel_id"]) or await self.bot.fetch_channel(msg_ref["channel_id"])
+                parent_msg = await chan.fetch_message(msg_ref["message_id"])
+                notice_msg = await parent_msg.reply(embed=embed, mention_author=False)
+                group.setdefault("notices", {})[guild_id] = {
+                    "channel_id": chan.id,
+                    "message_id": notice_msg.id,
+                }
+            except Exception as e:
+                logger.error(f"Failed to post reaction reply in thread {msg_ref['channel_id']}: {e}")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        """Passes emoji reactions across participating match threads so reactions never go unnoticed."""
+        """Passes emoji reactions across match threads as an in-place updated reply linked to the original message."""
         if payload.user_id == self.bot.user.id:
             return
 
-        # Check if reaction is in an active match thread
         match_id = self.bot.db.get_match_id_by_thread(payload.channel_id)
         if not match_id:
             return
 
-        source_guild_id = payload.guild_id
-        source_guild = self.bot.get_guild(source_guild_id)
-        member = payload.member or (source_guild and source_guild.get_member(payload.user_id))
-        if not member and source_guild:
+        group_id = self._msg_to_group.get(payload.message_id)
+        if not group_id:
+            group_id = f"m_{match_id}_{payload.message_id}"
+            self._register_message(group_id, match_id, payload.guild_id, payload.channel_id, payload.message_id)
+
+        group = self._message_groups.get(group_id)
+        if not group:
+            return
+
+        guild = self.bot.get_guild(payload.guild_id)
+        member = payload.member or (guild and guild.get_member(payload.user_id))
+        if not member and guild:
             try:
-                member = await source_guild.fetch_member(payload.user_id)
+                member = await guild.fetch_member(payload.user_id)
             except Exception:
                 member = None
 
         if not member or member.bot:
             return
 
-        source_icon = self.bot.db.get_server_emoji_tag(source_guild_id)
-        corp_name = source_guild.name if source_guild else "Unknown"
-        pilot_label = f"{member.display_name} [{corp_name}]"
+        corp_name = guild.name if guild else "Unknown"
+        emoji_str = str(payload.emoji)
+        group["reactions"][(payload.user_id, emoji_str)] = {
+            "pilot": member.display_name,
+            "corp": corp_name,
+            "emoji": emoji_str,
+        }
+        await self._sync_reaction_reply(group_id)
 
-        # Fetch original message that was reacted to
-        target_msg = None
-        try:
-            channel = self.bot.get_channel(payload.channel_id) or await self.bot.fetch_channel(payload.channel_id)
-            target_msg = await channel.fetch_message(payload.message_id)
-        except Exception:
-            pass
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        """Updates or removes the reaction reply when a user removes their reaction."""
+        if payload.user_id == self.bot.user.id:
+            return
 
-        # Build clean notice text
-        if target_msg and target_msg.content:
-            clean_snippet = target_msg.content.replace("\n", " ").strip()
-            preview = clean_snippet[:70] + ("…" if len(clean_snippet) > 70 else "")
-            notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to: *\"{preview}\"*"
-        elif target_msg and target_msg.embeds:
-            first_embed = target_msg.embeds[0]
-            if first_embed.author and first_embed.author.name:
-                notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to {first_embed.author.name}'s message"
-            elif first_embed.title and ("Dark Red Star" in first_embed.title or "Match" in first_embed.title):
-                notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to the match intro"
-            else:
-                notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to the thread embed"
-        else:
-            notice = f"{source_icon} **{pilot_label}** reacted with {payload.emoji}"
+        match_id = self.bot.db.get_match_id_by_thread(payload.channel_id)
+        if not match_id:
+            return
 
-        # Relay to all other threads in this match
-        all_threads = self.bot.db.get_match_threads(match_id)
-        for t_info in all_threads:
-            if t_info["guild_id"] == source_guild_id:
-                continue
-            try:
-                target_thread = await self.bot.fetch_channel(t_info["thread_id"])
-                await target_thread.send(notice, silent=True)
-            except Exception as e:
-                logger.error(f"Failed to relay reaction to thread {t_info['thread_id']}: {e}")
+        group_id = self._msg_to_group.get(payload.message_id)
+        if not group_id:
+            return
+
+        group = self._message_groups.get(group_id)
+        if not group:
+            return
+
+        emoji_str = str(payload.emoji)
+        if (payload.user_id, emoji_str) in group.get("reactions", {}):
+            del group["reactions"][(payload.user_id, emoji_str)]
+            await self._sync_reaction_reply(group_id)
 
     # ------------------------------------------------------------------
     # Feedback scheduler
