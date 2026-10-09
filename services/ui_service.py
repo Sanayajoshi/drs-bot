@@ -579,6 +579,17 @@ class CombinedTechView(discord.ui.View):
         self.delete_btn.callback = self.on_delete
         self.add_item(self.delete_btn)
 
+        # Queue Duration Button (10m - 60m)
+        cur_queue_mins = self.db.get_user_queue_time(discord_id) if hasattr(self.db, "get_user_queue_time") else 30
+        self.duration_btn = discord.ui.Button(
+            label=f"{cur_queue_mins}m Queue",
+            style=discord.ButtonStyle.secondary,
+            emoji="⏱️",
+            row=4
+        )
+        self.duration_btn.callback = self.on_duration_button
+        self.add_item(self.duration_btn)
+
     def build_embed(self, status_msg: str | None = None) -> discord.Embed:
         GEN = config.EMOJI_GENESIS
         ENR = config.EMOJI_ENRICH
@@ -630,6 +641,16 @@ class CombinedTechView(discord.ui.View):
                 f"• **Status:** {is_act}\n"
                 f"• **Tech:** {GEN} Genesis: **{g}**  |  {ENR} Enrich: **{e}**  |  {RSE} RSE: **{r}**\n\n"
                 "👇 *Use the dropdowns below to quickly change levels, or click **Rename & Edit**.*"
+            ),
+            inline=False
+        )
+
+        cur_q_mins = self.db.get_user_queue_time(self.discord_id) if hasattr(self.db, "get_user_queue_time") else 30
+        embed.add_field(
+            name="⏱️ Queue Duration",
+            value=(
+                f"• **Current Timer:** `{cur_q_mins} minutes` *(Default: 30m)*\n"
+                f"• *Click **⏱️ {cur_q_mins}m Queue** below to change your default queue time (10m – 60m).*"
             ),
             inline=False
         )
@@ -736,6 +757,110 @@ class CombinedTechView(discord.ui.View):
 
         view = CombinedTechView(self.db, self.discord_id)
         embed = view.build_embed(status_msg=f"🗑️ Deleted profile **{deleted_name}**.")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_duration_button(self, interaction: discord.Interaction):
+        cur_mins = self.db.get_user_queue_time(self.discord_id) if hasattr(self.db, "get_user_queue_time") else 30
+        view = QueueDurationSelectView(
+            self.db,
+            self.discord_id,
+            current_mins=cur_mins,
+            display_name=self.display_name,
+            selected_profile_id=self.selected_profile.get("id")
+        )
+        embed = discord.Embed(
+            title="⏱️ Default Queue Duration Settings",
+            description=(
+                f"Your current queue timer is set to **{cur_mins} minutes**.\n\n"
+                "When you join DRS or RS queues, your entry will automatically stay active "
+                "for this duration before expiring.\n\n"
+                "👇 *Select your preferred timer below (10 – 60 minutes in 10-minute increments):*"
+            ),
+            color=discord.Color.teal()
+        )
+        embed.set_footer(text="Default is 30 minutes. You can also extend +30m anytime with the ⏳ button.")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class QueueDurationSelectView(discord.ui.View):
+    """View allowing pilots to select their default queue duration in 10-minute increments (10m - 60m)."""
+    def __init__(self, db, discord_id: int, current_mins: int = 30, display_name: str = None, selected_profile_id: int | None = None):
+        super().__init__(timeout=180)
+        self.db = db
+        self.discord_id = discord_id
+        self.current_mins = current_mins
+        self.display_name = display_name
+        self.selected_profile_id = selected_profile_id
+
+        # Row 0: Select dropdown for 10-60 min
+        options = []
+        for m in [10, 20, 30, 40, 50, 60]:
+            is_def = (m == current_mins)
+            tag = " (Standard Default)" if m == 30 else ""
+            options.append(
+                discord.SelectOption(
+                    label=f"{m} Minutes{tag}",
+                    value=str(m),
+                    description=f"Auto-expire from queues after {m} minutes",
+                    emoji="⭐" if is_def else "⏱️",
+                    default=is_def
+                )
+            )
+
+        self.duration_select = discord.ui.Select(
+            placeholder=f"Choose Queue Duration (Current: {current_mins}m)...",
+            options=options,
+            row=0
+        )
+        self.duration_select.callback = self.on_select_duration
+        self.add_item(self.duration_select)
+
+        # Row 1: Quick button increments (10m, 20m, 30m, 40m, 50m)
+        for m in [10, 20, 30, 40, 50]:
+            btn = discord.ui.Button(
+                label=f"{m}m",
+                style=discord.ButtonStyle.success if m == current_mins else discord.ButtonStyle.secondary,
+                row=1
+            )
+            btn.callback = self._make_quick_callback(m)
+            self.add_item(btn)
+
+        # Row 2: 60m button + Back button
+        btn60 = discord.ui.Button(
+            label="60m",
+            style=discord.ButtonStyle.success if current_mins == 60 else discord.ButtonStyle.secondary,
+            row=2
+        )
+        btn60.callback = self._make_quick_callback(60)
+        self.add_item(btn60)
+
+        back_btn = discord.ui.Button(
+            label="Back to Tech & Profiles",
+            style=discord.ButtonStyle.primary,
+            emoji="🔙",
+            row=2
+        )
+        back_btn.callback = self.on_back
+        self.add_item(back_btn)
+
+    def _make_quick_callback(self, mins: int):
+        async def callback(interaction: discord.Interaction):
+            await self._apply_duration(interaction, mins)
+        return callback
+
+    async def on_select_duration(self, interaction: discord.Interaction):
+        mins = int(self.duration_select.values[0])
+        await self._apply_duration(interaction, mins)
+
+    async def _apply_duration(self, interaction: discord.Interaction, mins: int):
+        self.db.set_user_queue_time(self.discord_id, mins, display_name=self.display_name)
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=self.selected_profile_id, display_name=self.display_name)
+        embed = view.build_embed(status_msg=f"⏱️ Default queue timer set to **{mins} minutes**! All newly joined queues will expire after {mins}m.")
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_back(self, interaction: discord.Interaction):
+        view = CombinedTechView(self.db, self.discord_id, selected_profile_id=self.selected_profile_id, display_name=self.display_name)
+        embed = view.build_embed()
         await interaction.response.edit_message(embed=embed, view=view)
 
 

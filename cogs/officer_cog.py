@@ -747,26 +747,24 @@ class OfficerCog(commands.Cog):
             target_lang = target_server.get("language", "en")
             
             # Translate message if languages differ
-            display_content = content
-            footer_text = None
-            
             if source_lang != target_lang:
                 translated = await self._translate_mod_message(content, source_lang, target_lang)
                 if translated and translated != content:
-                    display_content = translated
-                    # Show preview of original text in footer
-                    truncated_original = content[:150] + ("..." if len(content) > 150 else "")
-                    footer_text = f"Original: {truncated_original}"
-
-            # Build a simple, clean message embed
-            embed = discord.Embed(
-                description=display_content,
-                color=discord.Color.blue()
-            )
-            embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
-            
-            if footer_text:
-                embed.set_footer(text=footer_text)
+                    embed = discord.Embed(
+                        description=f"**[{target_lang.upper()}]** {translated}",
+                        color=discord.Color.blue()
+                    )
+                    embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+                    orig_preview = content if len(content) <= 1000 else (content[:995] + "...")
+                    embed.add_field(name=f"📜 Original ({source_lang.upper()})", value=orig_preview, inline=False)
+                    if len(content) > 1000:
+                        embed.add_field(name="📜 Original (Cont.)", value=content[995:1995], inline=False)
+                else:
+                    embed = discord.Embed(description=content, color=discord.Color.blue())
+                    embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+            else:
+                embed = discord.Embed(description=content, color=discord.Color.blue())
+                embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
 
             try:
                 await target_channel.send(embed=embed)

@@ -88,6 +88,8 @@ class DatabaseOperations:
                 enrich_level  INTEGER CHECK (enrich_level  BETWEEN 6 AND 15),
                 modt_level    INTEGER CHECK (modt_level    BETWEEN 6 AND 15),
                 need_assist   INTEGER NOT NULL DEFAULT 0,
+                queue_mode    TEXT NOT NULL DEFAULT 'DRS',
+                default_queue_time_mins INTEGER NOT NULL DEFAULT 30,
                 created_at    TEXT NOT NULL DEFAULT (datetime('now'))
             )""",
             """CREATE TABLE IF NOT EXISTS user_servers (
@@ -303,6 +305,7 @@ class DatabaseOperations:
             "CREATE INDEX IF NOT EXISTS idx_cb_expires ON corp_bonuses(expires_at)",
             "ALTER TABLE users ADD COLUMN need_assist INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN queue_mode TEXT NOT NULL DEFAULT 'DRS'",
+            "ALTER TABLE users ADD COLUMN default_queue_time_mins INTEGER NOT NULL DEFAULT 30",
             "ALTER TABLE queue_entries ADD COLUMN queue_type TEXT NOT NULL DEFAULT 'DRS'",
             "ALTER TABLE matches ADD COLUMN match_type TEXT NOT NULL DEFAULT 'DRS'",
             "ALTER TABLE servers ADD COLUMN fact_frequency_hours INTEGER NOT NULL DEFAULT 4",
@@ -707,14 +710,38 @@ class DatabaseOperations:
 
     def get_user(self, discord_id: int) -> dict | None:
         row = self._execute(
-            "SELECT discord_id, display_name, genesis_level, enrich_level, modt_level, need_assist, queue_mode FROM users WHERE discord_id = ?",
+            "SELECT discord_id, display_name, genesis_level, enrich_level, modt_level, need_assist, queue_mode, default_queue_time_mins FROM users WHERE discord_id = ?",
             (discord_id,), fetch_one=True
         )
         if row:
             row["need_assist"] = bool(row.get("need_assist", 0))
             if not row.get("queue_mode"):
                 row["queue_mode"] = "DRS"
+            if not row.get("default_queue_time_mins"):
+                row["default_queue_time_mins"] = 30
         return row
+
+    def get_user_queue_time(self, discord_id: int) -> int:
+        user = self.get_user(discord_id)
+        if user and user.get("default_queue_time_mins"):
+            try:
+                mins = int(user["default_queue_time_mins"])
+                if 5 <= mins <= 180:
+                    return mins
+            except (ValueError, TypeError):
+                pass
+        return 30
+
+    def set_user_queue_time(self, discord_id: int, mins: int, display_name: str = None) -> bool:
+        if display_name:
+            self.ensure_user(discord_id, display_name=display_name)
+        else:
+            self.ensure_user(discord_id)
+        clamped = max(10, min(180, int(mins)))
+        return self._execute(
+            "UPDATE users SET default_queue_time_mins = ? WHERE discord_id = ?",
+            (clamped, discord_id)
+        ) is not None
 
     def get_user_queue_mode(self, discord_id: int) -> str:
         user = self.get_user(discord_id)

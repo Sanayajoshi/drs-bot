@@ -437,12 +437,19 @@ class ThreadCog(commands.Cog):
             # Translate only if languages differ
             if source_lang != target_lang:
                 translated = await self.thread_service.translate(content, source_lang, target_lang)
-                embed = discord.Embed(description=f"{source_icon} {translated}", color=discord.Color.dark_gray())
-                embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
-                # Show original message in footer when translation happened
-                if translated != content:
-                    footer_text = content[:200] + ("…" if len(content) > 200 else "")
-                    embed.set_footer(text=f"Original: {footer_text}")
+                if translated and translated != content:
+                    embed = discord.Embed(
+                        description=f"{source_icon} **[{target_lang.upper()}]** {translated}",
+                        color=discord.Color.dark_gray()
+                    )
+                    embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+                    orig_preview = content if len(content) <= 1000 else (content[:995] + "...")
+                    embed.add_field(name=f"📜 Original ({source_lang.upper()})", value=orig_preview, inline=False)
+                    if len(content) > 1000:
+                        embed.add_field(name="📜 Original (Cont.)", value=content[995:1995], inline=False)
+                else:
+                    embed = discord.Embed(description=f"{source_icon} {content}", color=discord.Color.dark_gray())
+                    embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
             else:
                 embed = discord.Embed(description=f"{source_icon} {content}", color=discord.Color.dark_gray())
                 embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
@@ -478,11 +485,19 @@ class ThreadCog(commands.Cog):
 
             if source_lang != target_lang:
                 translated = await self.thread_service.translate(content, source_lang, target_lang)
-                embed = discord.Embed(description=f"🛡️ {source_icon} {translated}", color=discord.Color.red())
-                embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
-                if translated != content:
-                    footer_text = content[:200] + ("…" if len(content) > 200 else "")
-                    embed.set_footer(text=f"Original: {footer_text}")
+                if translated and translated != content:
+                    embed = discord.Embed(
+                        description=f"🛡️ {source_icon} **[{target_lang.upper()}]** {translated}",
+                        color=discord.Color.red()
+                    )
+                    embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
+                    orig_preview = content if len(content) <= 1000 else (content[:995] + "...")
+                    embed.add_field(name=f"📜 Original ({source_lang.upper()})", value=orig_preview, inline=False)
+                    if len(content) > 1000:
+                        embed.add_field(name="📜 Original (Cont.)", value=content[995:1995], inline=False)
+                else:
+                    embed = discord.Embed(description=f"🛡️ {source_icon} {content}", color=discord.Color.red())
+                    embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
             else:
                 embed = discord.Embed(description=f"🛡️ {source_icon} {content}", color=discord.Color.red())
                 embed.set_author(name=author_label, icon_url=message.author.display_avatar.url)
@@ -494,6 +509,72 @@ class ThreadCog(commands.Cog):
                 pass
             except Exception as e:
                 logger.error(f"Report relay failed to thread {thread_info['thread_id']}: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Cross-Server Reaction Pass-through in Match Threads
+    # ------------------------------------------------------------------
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        """Passes emoji reactions across participating match threads so reactions never go unnoticed."""
+        if payload.user_id == self.bot.user.id:
+            return
+
+        # Check if reaction is in an active match thread
+        match_id = self.bot.db.get_match_id_by_thread(payload.channel_id)
+        if not match_id:
+            return
+
+        source_guild_id = payload.guild_id
+        source_guild = self.bot.get_guild(source_guild_id)
+        member = payload.member or (source_guild and source_guild.get_member(payload.user_id))
+        if not member and source_guild:
+            try:
+                member = await source_guild.fetch_member(payload.user_id)
+            except Exception:
+                member = None
+
+        if not member or member.bot:
+            return
+
+        source_icon = self.bot.db.get_server_emoji_tag(source_guild_id)
+        corp_name = source_guild.name if source_guild else "Unknown"
+        pilot_label = f"{member.display_name} [{corp_name}]"
+
+        # Fetch original message that was reacted to
+        target_msg = None
+        try:
+            channel = self.bot.get_channel(payload.channel_id) or await self.bot.fetch_channel(payload.channel_id)
+            target_msg = await channel.fetch_message(payload.message_id)
+        except Exception:
+            pass
+
+        # Build clean notice text
+        if target_msg and target_msg.content:
+            clean_snippet = target_msg.content.replace("\n", " ").strip()
+            preview = clean_snippet[:70] + ("…" if len(clean_snippet) > 70 else "")
+            notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to: *\"{preview}\"*"
+        elif target_msg and target_msg.embeds:
+            first_embed = target_msg.embeds[0]
+            if first_embed.author and first_embed.author.name:
+                notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to {first_embed.author.name}'s message"
+            elif first_embed.title and ("Dark Red Star" in first_embed.title or "Match" in first_embed.title):
+                notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to the match intro"
+            else:
+                notice = f"{source_icon} **{pilot_label}** reacted {payload.emoji} to the thread embed"
+        else:
+            notice = f"{source_icon} **{pilot_label}** reacted with {payload.emoji}"
+
+        # Relay to all other threads in this match
+        all_threads = self.bot.db.get_match_threads(match_id)
+        for t_info in all_threads:
+            if t_info["guild_id"] == source_guild_id:
+                continue
+            try:
+                target_thread = await self.bot.fetch_channel(t_info["thread_id"])
+                await target_thread.send(notice, silent=True)
+            except Exception as e:
+                logger.error(f"Failed to relay reaction to thread {t_info['thread_id']}: {e}")
 
     # ------------------------------------------------------------------
     # Feedback scheduler

@@ -25,7 +25,8 @@ class QueueService:
         if self.db.is_user_queued_for_level(discord_id, drs_level, queue_type):
             return "already_queued_for_level"
 
-        expires_at = datetime.utcnow() + timedelta(minutes=config.DEFAULT_EXPIRY_MINS)
+        queue_mins = self.db.get_user_queue_time(discord_id) if hasattr(self.db, "get_user_queue_time") else config.DEFAULT_EXPIRY_MINS
+        expires_at = datetime.utcnow() + timedelta(minutes=queue_mins)
         self.db.join_queue(discord_id, drs_level, expires_at, guild_id, queue_type=queue_type)
 
         target_size = config.DRS_MATCH_SIZE if queue_type == "DRS" else config.RS_MATCH_SIZE

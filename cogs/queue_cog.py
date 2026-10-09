@@ -217,10 +217,13 @@ class QueueCog(commands.Cog):
         for srv in self.bot.db.get_all_servers():
             g_id = srv["guild_id"]
             full_srv = self.bot.db.get_server(g_id)
-            if not full_srv or not full_srv.get("notification_channel_id"):
+            if not full_srv:
+                continue
+            target_chan_id = full_srv.get("notification_channel_id") or full_srv.get("queue_channel_id")
+            if not target_chan_id:
                 continue
             guild   = self.bot.get_guild(g_id)
-            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            channel = guild and guild.get_channel(target_chan_id)
             if not channel:
                 continue
             lang = full_srv.get("language", "en")
@@ -244,10 +247,13 @@ class QueueCog(commands.Cog):
         for srv in self.bot.db.get_all_servers():
             g_id = srv["guild_id"]
             full_srv = self.bot.db.get_server(g_id)
-            if not full_srv or not full_srv.get("notification_channel_id"):
+            if not full_srv:
+                continue
+            target_chan_id = full_srv.get("notification_channel_id") or full_srv.get("queue_channel_id")
+            if not target_chan_id:
                 continue
             guild   = self.bot.get_guild(g_id)
-            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            channel = guild and guild.get_channel(target_chan_id)
             if not channel:
                 continue
             lang = full_srv.get("language", "en")
@@ -387,17 +393,20 @@ class QueueCog(commands.Cog):
                 logger.error(f"notify_expiry_warning failed for guild {guild_id}: {e}")
 
     async def _notify_expired(self, discord_id: int, display_name: str, drs_level: int, queue_type: str = "DRS", target_guild_id: int = None):
-        guilds = [target_guild_id] if target_guild_id else [s["guild_id"] for s in self.bot.db.get_all_servers()]
         server_icon = self.bot.db.get_server_emoji_tag(target_guild_id)
         icon_prefix = f"{server_icon} " if server_icon else ""
-        for guild_id in guilds:
+        for srv in self.bot.db.get_all_servers():
+            guild_id = srv["guild_id"]
             if not guild_id:
                 continue
             full_srv = self.bot.db.get_server(guild_id)
-            if not full_srv or not full_srv.get("notification_channel_id"):
+            if not full_srv:
+                continue
+            target_chan_id = full_srv.get("notification_channel_id") or full_srv.get("queue_channel_id")
+            if not target_chan_id:
                 continue
             guild   = self.bot.get_guild(guild_id)
-            channel = guild and guild.get_channel(full_srv["notification_channel_id"])
+            channel = guild and guild.get_channel(target_chan_id)
             if not channel:
                 continue
             lang = full_srv.get("language", "en")

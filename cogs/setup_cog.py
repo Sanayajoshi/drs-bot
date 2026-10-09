@@ -397,6 +397,43 @@ class SetupCog(commands.Cog):
         lang_name = SUPPORTED_LANGUAGES.get(lang_code, lang_code)
         await ctx.send(t(lang_code, "lang_set", lang=lang_name))
 
+    @drs.command(name="queue_time", description="Set your default queue expiration duration")
+    @app_commands.describe(minutes="Queue expiration duration (10 - 60 minutes)")
+    @app_commands.choices(minutes=[
+        app_commands.Choice(name="10 Minutes", value=10),
+        app_commands.Choice(name="20 Minutes", value=20),
+        app_commands.Choice(name="30 Minutes (Default)", value=30),
+        app_commands.Choice(name="40 Minutes", value=40),
+        app_commands.Choice(name="50 Minutes", value=50),
+        app_commands.Choice(name="60 Minutes", value=60),
+    ])
+    async def queue_time_slash(self, interaction: discord.Interaction, minutes: app_commands.Choice[int]):
+        mins = minutes.value
+        self.bot.db.set_user_queue_time(interaction.user.id, mins, display_name=interaction.user.display_name)
+        await interaction.response.send_message(
+            f"⏱️ Your default queue duration has been set to **{mins} minutes**!\n"
+            f"All future queues you join will automatically remain active for {mins}m.",
+            ephemeral=True
+        )
+
+    @commands.command(name="time", aliases=["queuetime", "qtime"])
+    async def queue_time_prefix(self, ctx: commands.Context, minutes: int = None):
+        """View or set your default queue duration (10 - 60 mins)."""
+        if minutes is None:
+            cur = self.bot.db.get_user_queue_time(ctx.author.id) if hasattr(self.bot.db, "get_user_queue_time") else 30
+            await ctx.send(
+                f"⏱️ Your current default queue timer is **{cur} minutes**.\n"
+                f"*To change it, use:* `.time <10-60>` (e.g. `.time 45`), or click `🛠️ Set Tech` -> `⏱️ {cur}m Queue` on the queue board."
+            )
+            return
+
+        if minutes < 10 or minutes > 60:
+            await ctx.send("⚠️ Please choose a duration between **10** and **60** minutes (e.g. `.time 40`).")
+            return
+
+        self.bot.db.set_user_queue_time(ctx.author.id, minutes, display_name=ctx.author.display_name)
+        await ctx.send(f"✅ Set your default queue duration to **{minutes} minutes**! All newly joined queues will last {minutes}m.")
+
     @drs.command(name="status", description="Show current bot configuration for this server")
     async def status(self, interaction: discord.Interaction):
         lang = self._lang(interaction.guild_id)
