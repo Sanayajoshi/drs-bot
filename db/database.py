@@ -522,6 +522,13 @@ class DatabaseOperations:
         )
         return [r["guild_id"] for r in rows] if rows else []
 
+    def get_user_primary_guild(self, discord_id: int) -> int | None:
+        row = self._execute(
+            "SELECT guild_id FROM user_servers WHERE discord_id = ? ORDER BY last_seen DESC LIMIT 1",
+            (discord_id,), fetch_one=True
+        )
+        return row["guild_id"] if row else None
+
     def get_user_profiles(self, discord_id: int, display_name: str | None = None) -> list[dict]:
         """Fetch all profiles for a user. Initializes default 'Main' profile if none exist."""
         self.ensure_user(discord_id, display_name)

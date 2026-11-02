@@ -99,6 +99,22 @@ class TestDatabaseOperations(unittest.TestCase):
         self.db.eject_player_from_all_queues(101)
         self.assertEqual(len(self.db.get_queue_for_level(9, queue_type="DRS")), 0)
 
+    def test_queue_expiry_preserves_origin_guild(self):
+        self.db.upsert_server(1111)
+        self.db.upsert_server(2222)
+        self.db.upsert_user(301, "Delta")
+        self.db.upsert_user_server(301, 1111, "Delta")
+
+        # Join player in server 1111 with an already expired timestamp
+        past = datetime.now(timezone.utc) - timedelta(minutes=5)
+        self.db.join_queue(301, 9, past, 1111, queue_type="DRS")
+
+        expired = self.db.remove_expired_entries()
+        self.assertEqual(len(expired), 1)
+        self.assertEqual(expired[0]["discord_id"], 301)
+        self.assertEqual(expired[0]["queue_guild_id"], 1111)
+        self.assertEqual(self.db.get_user_primary_guild(301), 1111)
+
     def test_matches_and_feedback(self):
         self.db.upsert_server(9999)
         self.db.upsert_user(201, "P1")
